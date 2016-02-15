@@ -1,0 +1,2 @@
+# gopassivedns
+PassiveDNS in Go
