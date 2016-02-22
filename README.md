@@ -1,3 +1,7 @@
+
+#NOT PRODUCTION READY
+There are missing features and known problems in this code.  Wait a week or two and I'll have a v0.1 that should be production-ready.
+
 # gopassivedns
 Network-based DNS logging in Go
 
@@ -15,7 +19,9 @@ Resolver support for query logging, including both the question and answer is sp
    * -p pcap file
    * -l log file
 
-You must supply either -i or -p.
+You must supply either -i or -p.  
+
+There are known issues with goroutines and the standard daemonize process (https://github.com/golang/go/issues/227), so I strongly recommend you use one of the methods detaild here: http://stackoverflow.com/questions/10067295/how-to-start-a-go-program-as-a-daemon-in-ubuntu to run this process as a daemon using system tools.
 
 ##Deployment Guide
 
@@ -26,5 +32,9 @@ You have 3 choices: deploy it on your resolver(s) or deploy it on your gateway(s
 Right now, I'd recommend using logstash to ship the logs to an elasticsearch cluster.  All the logs are JSON, so this should be pretty easy.  In the future, I will add native kafka support that should make that easier.  I would also suggest using something like HDFS for long term storage and bulk analysis.  DNS queries are an amazing source of internal data!
 
 
-
+##Build and install
+   * clone this repo
+   * 'go get'
+   * 'go build -o gopassivedns'  (the -o is really just being careful, assuming you cloned the repo you shouldn't need it)
+   * 'cp gopassivedns /some/path/to/gopassivedns'
 
