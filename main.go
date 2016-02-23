@@ -6,7 +6,7 @@ import "log"
 import "strconv"
 import "time"
 import "net"
-//import "os"
+import "os"
 import "encoding/json"
 //import "github.com/Shopify/sarama"
 import "github.com/google/gopacket"
@@ -15,10 +15,10 @@ import "github.com/google/gopacket/layers"
 
 
 /*
-    logging to file
+    -logging to file
     debug logging
     ttlcache for failed queries
-    documentation
+    -documentation
 release v1    
     
     stats output
@@ -253,11 +253,6 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry){
     			            Client:         dstIP,
     			            Timestamp:      time.Now().UTC().Format(time.RFC3339),
                 		}
-                		
-                		//marshal to JSON.  Maybe we should do this in the log thread?
-                		//encoded, _ := logEntry.Encode()
-                        //
-                        //logC <- string(encoded)
                         
                         logC <- logEntry
                         
@@ -277,23 +272,79 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry){
     }
 }
 
-func logConn(logC chan dnsLogEntry){
+//Round-robin log messages to log sinks
+func logConn(logC chan dnsLogEntry, stdout bool, file bool, kafka bool, 
+            filename string, kafka_brokers string, kafka_topic string){
+    
+    var logs []chan dnsLogEntry
+    
+    if stdout {
+        stdoutChan := make(chan dnsLogEntry)
+        logs = append(logs, stdoutChan)
+        go logConnStdout(stdoutChan)
+    }
+    
+    if file {
+        fileChan := make(chan dnsLogEntry)
+        logs = append(logs, fileChan)
+        go logConnFile(fileChan, filename)
+    }
+    
+    if kafka && false {
+        kafkaChan := make(chan dnsLogEntry)
+        logs = append(logs, kafkaChan)
+        go logConnKafka(kafkaChan, kafka_brokers, kafka_topic)
+    }
+    
+    for message := range logC {
+        for _, logChan := range logs {
+            logChan <- message
+        }
+    }
+}
+
+func logConnStdout(logC chan dnsLogEntry){
     for message := range logC {
         //marshal to JSON.  Maybe we should do this in the log thread?
         encoded, _ := message.Encode()
-
         fmt.Println(string(encoded))
     }
 }
 
+func logConnFile(logC chan dnsLogEntry, filename string){
+    
+    f, err := os.OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0666)
+    if err != nil {
+        panic(err)
+    }
+    
+    defer f.Close()
+    
+    for message := range logC {
+        //marshal to JSON.  Maybe we should do this in the log thread?
+        encoded, _ := message.Encode()
+        f.WriteString(string(encoded)+"\n")
+    }
+}
+
+func logConnKafka(logC chan dnsLogEntry, kafka_brokers string, kafka_topic string){
+    for message := range logC {
+        //marshal to JSON.  Maybe we should do this in the log thread?
+        encoded, _ := message.Encode()
+        fmt.Println("Kafka: "+string(encoded))
+    }
+}
+
+
 func main(){
 
     var dev = flag.String("dev", "", "Capture Device")
-//    var kafka_brokers   = flag.String("kafka_brokers", os.Getenv("KAFKA_PEERS"), "The Kafka brokers to connect to, as a comma separated list")
-//    var kafka_topic = flag.String("kafka_topic","","Kafka topic for output")
+    var kafka_brokers   = flag.String("kafka_brokers", os.Getenv("KAFKA_PEERS"), "The Kafka brokers to connect to, as a comma separated list")
+    var kafka_topic = flag.String("kafka_topic","","Kafka topic for output")
     var bpf = flag.String("bpf","port 53","BPF Filter")
     var pcapFile = flag.String("pcap","","pcap file")
-//    var logfile = flag.String("logfile","","log file (recommended for debug only")
+    var logfile = flag.String("logfile","","log file (recommended for debug only")
+    var quiet = flag.Bool("quiet", false, "do not log to stdout")
     
     flag.Parse()
     
@@ -317,7 +368,18 @@ func main(){
  
     /* spin up logging thread */
     var logChan = make(chan dnsLogEntry)
-    go logConn(logChan)
+    var log_file bool = false
+    var log_kafka bool = false
+    
+    if *logfile != "" {
+        log_file = true
+    }
+    
+    if *kafka_brokers != "" && *kafka_topic != "" {
+        log_kafka = true
+    }
+    
+    go logConn(logChan, !*quiet, log_file, log_kafka, *logfile, *kafka_brokers, *kafka_topic)
  
     /* init channels for the packet handlers and kick off handler threads */
     var channels [8]chan gopacket.Packet
