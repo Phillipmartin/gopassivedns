@@ -79,7 +79,7 @@ func (dle *dnsLogEntry) Encode() ([]byte, error) {
 /* validate if DNS, make conntable entry and output 
    to log channel if there is a match 
    */
-func handlePacket(packets chan gopacket.Packet, logC chan string){
+func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry){
     
     //DNS IDs are stored as uint16s by the gopacket DNS layer
     //TODO: fix the memory leak of failed lookups by making this a ttlcache
@@ -171,7 +171,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan string){
                     
                         //TODO: debug message here "query failure code N for query ID NNNN"
                     
-                        logEntry := &dnsLogEntry{
+                        logEntry := dnsLogEntry{
                             Query_ID:       dns.ID,
     		            	Question:       string(question.Questions[0].Name),
     		            	Response_Code:  int(dns.ResponseCode),
@@ -187,9 +187,11 @@ func handlePacket(packets chan gopacket.Packet, logC chan string){
                 		}
                 		
                 		//marshal to JSON.  Maybe we should do this in the log thread?
-                		encoded, _ := logEntry.Encode()
+                		//encoded, _ := logEntry.Encode()
+                        //
+                        //logC <- string(encoded)
                         
-                        logC <- string(encoded)
+                        logC <- logEntry
                         
                         continue
                     
@@ -237,7 +239,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan string){
                                 typeString = "SRV"
                         }
 
-                        logEntry := &dnsLogEntry{
+                        logEntry := dnsLogEntry{
                             Query_ID:       dns.ID,
     		            	Question:       string(question.Questions[0].Name),
     		            	Response_Code:  int(dns.ResponseCode),
@@ -253,9 +255,12 @@ func handlePacket(packets chan gopacket.Packet, logC chan string){
                 		}
                 		
                 		//marshal to JSON.  Maybe we should do this in the log thread?
-                		encoded, _ := logEntry.Encode()
+                		//encoded, _ := logEntry.Encode()
+                        //
+                        //logC <- string(encoded)
                         
-                        logC <- string(encoded)
+                        logC <- logEntry
+                        
                     }
                 }else{
                     //This might happen if we get a query ID collision
@@ -272,9 +277,12 @@ func handlePacket(packets chan gopacket.Packet, logC chan string){
     }
 }
 
-func logConn(logC chan string){
+func logConn(logC chan dnsLogEntry){
     for message := range logC {
-        fmt.Println(message)
+        //marshal to JSON.  Maybe we should do this in the log thread?
+        encoded, _ := message.Encode()
+
+        fmt.Println(string(encoded))
     }
 }
 
@@ -308,7 +316,7 @@ func main(){
     if err != nil { log.Fatal(err) }
  
     /* spin up logging thread */
-    var logChan = make(chan string)
+    var logChan = make(chan dnsLogEntry)
     go logConn(logChan)
  
     /* init channels for the packet handlers and kick off handler threads */
