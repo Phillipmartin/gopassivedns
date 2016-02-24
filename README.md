@@ -1,6 +1,6 @@
 
-#NOT PRODUCTION READY
-There are missing features and known problems in this code.  Wait a week or two and I'll have a v0.1 that should be production-ready.
+#BETA-ISH QUALITY
+There are missing features in this code.  I don't think it is going to crash and burn at this point, but no promises on performance or long-term stability in the face of actual dns lookups.
 
 # gopassivedns
 Network-based DNS logging in Go
