@@ -14,12 +14,16 @@ Resolver support for query logging, including both the question and answer is sp
 
 ##Usage
 
-   * -i dev
-   * -b bpf filter
-   * -p pcap file
-   * -l log file
+   * -dev device
+   * -bpf bpf filter
+   * -pcap pcap file
+   * -logfile log file
+   * -quiet don't log DNS lookups to STDOUT
+   * -debug enable debug logging to STDOUT
+   * -gc_age  age at which incomplete connections should be garbage collected
+   * -gc_interval  interval at which GC should run on connection table
 
-You must supply either -i or -p.  
+You must supply either -dev or -pcap.  
 
 There are known issues with goroutines and the standard daemonize process (https://github.com/golang/go/issues/227), so I strongly recommend you use one of the methods detaild here: http://stackoverflow.com/questions/10067295/how-to-start-a-go-program-as-a-daemon-in-ubuntu to run this process as a daemon using system tools.
 
