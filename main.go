@@ -23,6 +23,7 @@ Plans:
     TCP flow support
 release v2
 
+    syslog logging
     logging to kafka
     add PF_RING support
 release v3
