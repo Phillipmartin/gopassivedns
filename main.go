@@ -17,7 +17,7 @@ import "github.com/google/gopacket/layers"
 /*
 Plans:
 
-    code cleanup (e.g. switch everything to camelCase)
+    code cleanup (e.g. break up handlePacket, switch everything to camelCase)
     stats output
     perf testing
     TCP flow support
@@ -93,6 +93,77 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, max_age time.Duration, int
 	}
 }
 
+/*
+    The gopacket DNS layer doesn't have a lot of good String()
+    conversion methods, so we have to do a lot of that ourselves
+    here.  Much of this should move back into gopacket.  Also a
+    little worried about the perf impact of doing string conversions
+    in this thread...
+*/
+func TypeString(dnsType layers.DNSType) string {
+    switch dnsType {
+        default:
+        	//take a blind stab...at least this shouldn't *lose* data
+        	return strconv.Itoa(int(dnsType))
+        case layers.DNSTypeA:
+        	return "A"
+        case layers.DNSTypeAAAA:
+        	return "AAAA"
+        case layers.DNSTypeCNAME:
+        	return "CNAME"
+        case layers.DNSTypeMX:
+        	return "MX"
+        case layers.DNSTypeNS:
+        	return "NS"
+        case layers.DNSTypePTR:
+        	return "PTR"
+        case layers.DNSTypeTXT:
+        	return "TXT"
+        case layers.DNSTypeSOA:
+        	return "SOA"
+        case layers.DNSTypeSRV:
+        	return "SRV"
+        case 255: //ANY query per http://tools.ietf.org/html/rfc1035#page-12
+		    return "ANY"
+        }
+}
+
+/*
+    The gopacket DNS layer doesn't have a lot of good String()
+    conversion methods, so we have to do a lot of that ourselves
+    here.  Much of this should move back into gopacket.  Also a
+    little worried about the perf impact of doing string conversions
+    in this thread...
+*/
+func RrString(rr layers.DNSResourceRecord) string {
+    switch rr.Type {
+        default:
+        	//take a blind stab...at least this shouldn't *lose* data
+        	return string(rr.Data)
+        case layers.DNSTypeA:
+        	return rr.IP.String()
+        case layers.DNSTypeAAAA:
+        	return rr.IP.String()
+        case layers.DNSTypeCNAME:
+        	return string(rr.CNAME)
+        case layers.DNSTypeMX:
+        	//TODO: add the priority
+        	return string(rr.MX.Name)
+        case layers.DNSTypeNS:
+        	return string(rr.NS)
+        case layers.DNSTypePTR:
+        	return string(rr.PTR)
+        case layers.DNSTypeTXT:
+        	return string(rr.TXT)
+        case layers.DNSTypeSOA:
+        	//TODO: rebuild the full SOA string
+        	return string(rr.SOA.RName)
+        case layers.DNSTypeSRV:
+        	//TODO: rebuild the full SRV string
+        	return string(rr.SRV.Name)
+        }
+}
+
 /* validate if DNS, make conntable entry and output
    to log channel if there is a match
 */
@@ -154,44 +225,9 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 					   TODO: Also loop through Additional records in addition to Answers
 					*/
 
-					/*
-					   The gopacket DNS layer doesn't have a lot of good String()
-					   conversion methods, so we have to do a lot of that ourselves
-					   here.  Much of this should move back into gopacket.  Also a
-					   little worried about the perf impact of doing string conversions
-					   in this thread...
+                    questionType := TypeString(question.Questions[0].Type)
 
-					*/
-
-					var questionType string
-
-					switch question.Questions[0].Type {
-					default:
-						log.Debug("Got unknown record type: " + strconv.Itoa(int(question.Questions[0].Type)))
-						questionType = strconv.Itoa(int(question.Questions[0].Type))
-					case layers.DNSTypeA:
-						questionType = "A"
-					case layers.DNSTypeAAAA:
-						questionType = "AAAA"
-					case layers.DNSTypeCNAME:
-						questionType = "CNAME"
-					case layers.DNSTypeMX:
-						questionType = "MX"
-					case layers.DNSTypeNS:
-						questionType = "NS"
-					case layers.DNSTypePTR:
-						questionType = "PTR"
-					case layers.DNSTypeTXT:
-						questionType = "TXT"
-					case layers.DNSTypeSOA:
-						questionType = "SOA"
-					case layers.DNSTypeSRV:
-						questionType = "SRV"
-					case 255: //ANY query per http://tools.ietf.org/html/rfc1035#page-12
-						questionType = "ANY"
-					}
-
-					//a response code of 0 means success
+					//a response code other than 0 means failure of some kind
 					if dns.ResponseCode != 0 {
 
 						logEntry := dnsLogEntry{
@@ -212,50 +248,12 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 						logC <- logEntry
 
 						continue
-
 					}
 
 					for _, answer := range dns.Answers {
 
-						var answerString string
-						var typeString string
-
-						switch answer.Type {
-						default:
-							//take a blind stab...at least this shouldn't *lose* data
-							answerString = string(answer.Data)
-							typeString = strconv.Itoa(int(answer.Type))
-						case layers.DNSTypeA:
-							answerString = answer.IP.String()
-							typeString = "A"
-						case layers.DNSTypeAAAA:
-							answerString = answer.IP.String()
-							typeString = "AAAA"
-						case layers.DNSTypeCNAME:
-							answerString = string(answer.CNAME)
-							typeString = "CNAME"
-						case layers.DNSTypeMX:
-							//TODO: add the priority
-							answerString = string(answer.MX.Name)
-							typeString = "MX"
-						case layers.DNSTypeNS:
-							answerString = string(answer.NS)
-							typeString = "NS"
-						case layers.DNSTypePTR:
-							answerString = string(answer.PTR)
-							typeString = "PTR"
-						case layers.DNSTypeTXT:
-							answerString = string(answer.TXT)
-							typeString = "TXT"
-						case layers.DNSTypeSOA:
-							//TODO: rebuild the full SOA string
-							answerString = string(answer.SOA.RName)
-							typeString = "SOA"
-						case layers.DNSTypeSRV:
-							//TODO: rebuild the full SRV string
-							answerString = string(answer.SRV.Name)
-							typeString = "SRV"
-						}
+                        answerString := RrString(answer)
+                        typeString := TypeString(answer.Type)
 
 						logEntry := dnsLogEntry{
 							Query_ID:      dns.ID,
