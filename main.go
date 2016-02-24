@@ -15,11 +15,7 @@ import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/layers"
 
 /*
-    -logging to file
-    -debug logging
-    -ttlcache for failed queries
-    -documentation
-release v0.1
+Plans:
 
     code cleanup (e.g. switch everything to camelCase)
     stats output
@@ -33,7 +29,6 @@ release v3
 
     maybe use something with a larger keyspace than the query ID for the conntable map
     maybe not so many string conversions?
-    maybe move the dnsLogEntry struct -> JSON encoding to the log channel?
     add more Types to gopacket
 */
 
