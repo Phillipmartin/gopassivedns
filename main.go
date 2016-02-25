@@ -206,7 +206,6 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 				continue
 			}
 
-
             item, found_item := conntable[dns.ID];
 
 			//this is a Query Response packet
@@ -227,16 +226,14 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 				   TODO: Also loop through Additional records in addition to Answers
 				*/
 
-                questionType := TypeString(question.Questions[0].Type)
-
 				//a response code other than 0 means failure of some kind
 				if dns.ResponseCode != 0 {
-
+				    
 					logEntry := dnsLogEntry{
 						Query_ID:      dns.ID,
 						Question:      string(question.Questions[0].Name),
 						Response_Code: int(dns.ResponseCode),
-						Question_Type: questionType,
+						Question_Type: TypeString(question.Questions[0].Type),
 						Answer:        dns.ResponseCode.String(),
 						Answer_Type:   "",
 						TTL:           0,
@@ -254,16 +251,13 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 
 				for _, answer := range dns.Answers {
 
-                    answerString := RrString(answer)
-                    typeString := TypeString(answer.Type)
-
 					logEntry := dnsLogEntry{
 						Query_ID:      dns.ID,
 						Question:      string(question.Questions[0].Name),
 						Response_Code: int(dns.ResponseCode),
-						Question_Type: questionType,
-						Answer:        answerString,
-						Answer_Type:   typeString,
+						Question_Type: TypeString(question.Questions[0].Type),
+						Answer:        RrString(answer),
+						Answer_Type:   TypeString(answer.Type),
 						TTL:           answer.TTL,
 						//this is the answer packet, which comes from the server...
 						Server: srcIP,
@@ -293,7 +287,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 }
 
 //Round-robin log messages to log sinks
-func logConn(logC chan dnsLogEntry, stdout bool, file bool, kafka bool,
+func logConn(logC chan dnsLogEntry, stdout bool,
 	filename string, kafka_brokers string, kafka_topic string) {
 
 	var logs []chan dnsLogEntry
@@ -305,14 +299,14 @@ func logConn(logC chan dnsLogEntry, stdout bool, file bool, kafka bool,
 		go logConnStdout(stdoutChan)
 	}
 
-	if file {
+	if filename != "" {
 		log.Debug("file logging enabled to " + filename)
 		fileChan := make(chan dnsLogEntry)
 		logs = append(logs, fileChan)
 		go logConnFile(fileChan, filename)
 	}
 
-	if kafka && false {
+	if kafka_brokers != "" && kafka_topic != "" && false {
 		log.Debug("kafka logging enabled")
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
@@ -403,33 +397,20 @@ func main() {
 
 	/* spin up logging thread */
 	var logChan = make(chan dnsLogEntry)
-	var log_file bool = false
-	var log_kafka bool = false
 
-	if *logfile != "" {
-		log_file = true
-	}
-
-	if *kafka_brokers != "" && *kafka_topic != "" {
-		log_kafka = true
-	}
-
-	var gc_age_dur time.Duration
-	var gc_interval_dur time.Duration
-
-	if gc_age_tmp, err := time.ParseDuration(*gc_age); err != nil {
+	gc_age_dur, err := time.ParseDuration(*gc_age)
+	
+	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '-1m'")
-	} else {
-		gc_age_dur = gc_age_tmp
 	}
 
-	if gc_interval_tmp, err := time.ParseDuration(*gc_interval); err != nil {
+	gc_interval_dur, err := time.ParseDuration(*gc_interval)
+	
+	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
-	} else {
-		gc_interval_dur = gc_interval_tmp
 	}
 
-	go logConn(logChan, !*quiet, log_file, log_kafka, *logfile, *kafka_brokers, *kafka_topic)
+	go logConn(logChan, !*quiet, *logfile, *kafka_brokers, *kafka_topic)
 
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels [8]chan gopacket.Packet
