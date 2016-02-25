@@ -388,7 +388,20 @@ func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle{
 }
 
 func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry, 
-            gc_age_dur time.Duration, gc_interval_dur time.Duration){
+            gc_age string, gc_interval string){
+
+    gc_age_dur, err := time.ParseDuration(gc_age)
+	
+	if err != nil {
+		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '-1m'")
+	}
+
+	gc_interval_dur, err := time.ParseDuration(gc_interval)
+	
+	if err != nil {
+		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
+	}
+                
     /* init channels for the packet handlers and kick off handler threads */
 	var channels [8]chan gopacket.Packet
 	for i := 0; i < 8; i++ {
@@ -409,6 +422,18 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 			channels[int(net.NetworkFlow().FastHash())&0x7] <- packet
 		}
 	}
+}
+
+func initLogging(debug bool) chan dnsLogEntry{
+    if debug {
+		log.SetLevel(log.DebugLevel)
+	}
+
+	/* spin up logging channel */
+	var logChan = make(chan dnsLogEntry)
+
+    return logChan
+
 }
 
 
@@ -433,26 +458,10 @@ func main() {
         log.Fatal("Could not initilize the capture.")
     }
 
-	if *debug {
-		log.SetLevel(log.DebugLevel)
-	}
+    logChan := initLogging(*debug)
 
-	/* spin up logging thread */
-	var logChan = make(chan dnsLogEntry)
 	go logConn(logChan, !*quiet, *logfile, *kafka_brokers, *kafka_topic)
 
-	gc_age_dur, err := time.ParseDuration(*gc_age)
-	
-	if err != nil {
-		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '-1m'")
-	}
-
-	gc_interval_dur, err := time.ParseDuration(*gc_interval)
-	
-	if err != nil {
-		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
-	}
-
-    doCapture(handle, logChan, gc_age_dur, gc_interval_dur)
+    doCapture(handle, logChan, *gc_age, *gc_interval)
 
 }
