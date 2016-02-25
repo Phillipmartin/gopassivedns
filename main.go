@@ -17,7 +17,7 @@ import "github.com/google/gopacket/layers"
 /*
 Plans:
 
-    code cleanup (e.g. break up handlePacket, switch everything to camelCase)
+    -code cleanup (e.g. break up handlePacket, switch everything to camelCase)
     stats output
     perf testing
     TCP flow support
@@ -77,15 +77,15 @@ type dnsMapEntry struct {
 
 //background task to clear out stale entries in the conntable
 //one of these gets spun up for every packet handling thread
-func cleanDnsCache(conntable *map[uint16]dnsMapEntry, max_age time.Duration, interval time.Duration) {
+func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, interval time.Duration) {
 
 	for {
 		time.Sleep(interval)
 
 		//max_age should be negative, e.g. -1m
-		cleanup_cutoff := time.Now().Add(max_age)
+		cleanupCutoff := time.Now().Add(maxAge)
 		for key, item := range *conntable {
-			if item.inserted.Before(cleanup_cutoff) {
+			if item.inserted.Before(cleanupCutoff) {
 				log.Debug("conntable GC: cleanup query ID " + strconv.Itoa(int(key)))
 				delete(*conntable, key)
 			}
@@ -249,14 +249,14 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question *layers.DNS, reply *layer
    to log channel if there is a match
 */
 func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
-	gc_interval time.Duration, gc_age time.Duration) {
+	gcInterval time.Duration, gcAge time.Duration) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
 	//TODO: fix the memory leak of failed lookups by making this a ttlcache
 	var conntable = make(map[uint16]dnsMapEntry)
 
 	//setup garbage collection for this map
-	go cleanDnsCache(&conntable, gc_age, gc_interval)
+	go cleanDnsCache(&conntable, gcAge, gcInterval)
 
 	for packet := range packets {
 		srcIP, dstIP := getIpaddrs(packet)
@@ -271,10 +271,10 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 				continue
 			}
 
-			item, found_item := conntable[dns.ID]
+			item, foundItem := conntable[dns.ID]
 
 			//this is a Query Response packet
-			if dns.QR && found_item {
+			if dns.QR && foundItem {
 				question := item.entry
 				//We have both legs of the connection, so drop the connection from the table
 				log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
@@ -284,7 +284,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 					logC <- logEntry
 				}
 
-			} else if dns.QR && !found_item {
+			} else if dns.QR && !foundItem {
 				//This might happen if we get a query ID collision
 				log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
 				continue
@@ -303,7 +303,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 
 //Round-robin log messages to log sinks
 func logConn(logC chan dnsLogEntry, stdout bool,
-	filename string, kafka_brokers string, kafka_topic string) {
+	filename string, kafkaBrokers string, kafkaTopic string) {
 
 	var logs []chan dnsLogEntry
 
@@ -321,11 +321,11 @@ func logConn(logC chan dnsLogEntry, stdout bool,
 		go logConnFile(fileChan, filename)
 	}
 
-	if kafka_brokers != "" && kafka_topic != "" && false {
+	if kafkaBrokers != "" && kafkaTopic != "" && false {
 		log.Debug("kafka logging enabled")
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
-		go logConnKafka(kafkaChan, kafka_brokers, kafka_topic)
+		go logConnKafka(kafkaChan, kafkaBrokers, kafkaTopic)
 	}
 
 	//setup is done, now we sit here and dispatch messages to the configured sinks
@@ -359,7 +359,7 @@ func logConnFile(logC chan dnsLogEntry, filename string) {
 	}
 }
 
-func logConnKafka(logC chan dnsLogEntry, kafka_brokers string, kafka_topic string) {
+func logConnKafka(logC chan dnsLogEntry, kafkaBrokers string, kafkaTopic string) {
 	for message := range logC {
 		//marshal to JSON.  Maybe we should do this in the log thread?
 		encoded, _ := message.Encode()
@@ -399,15 +399,15 @@ func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle {
 }
 
 func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
-	gc_age string, gc_interval string) {
+	gcAge string, gcInterval string) {
 
-	gc_age_dur, err := time.ParseDuration(gc_age)
+	gcAgeDur, err := time.ParseDuration(gcAge)
 
 	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '-1m'")
 	}
 
-	gc_interval_dur, err := time.ParseDuration(gc_interval)
+	gcIntervalDur, err := time.ParseDuration(gcInterval)
 
 	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
@@ -417,7 +417,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	var channels [8]chan gopacket.Packet
 	for i := 0; i < 8; i++ {
 		channels[i] = make(chan gopacket.Packet)
-		go handlePacket(channels[i], logChan, gc_interval_dur, gc_age_dur)
+		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur)
 	}
 
 	// Use the handle as a packet source to process all packets
@@ -450,14 +450,14 @@ func initLogging(debug bool) chan dnsLogEntry {
 func main() {
 
 	var dev = flag.String("dev", "", "Capture Device")
-	var kafka_brokers = flag.String("kafka_brokers", os.Getenv("KAFKA_PEERS"), "The Kafka brokers to connect to, as a comma separated list")
-	var kafka_topic = flag.String("kafka_topic", "", "Kafka topic for output")
+	var kafkaBrokers = flag.String("kafka_brokers", os.Getenv("KAFKA_PEERS"), "The Kafka brokers to connect to, as a comma separated list")
+	var kafkaTopic = flag.String("kafka_topic", "", "Kafka topic for output")
 	var bpf = flag.String("bpf", "port 53", "BPF Filter")
 	var pcapFile = flag.String("pcap", "", "pcap file")
-	var logfile = flag.String("logfile", "", "log file (recommended for debug only")
+	var logFile = flag.String("logfile", "", "log file (recommended for debug only")
 	var quiet = flag.Bool("quiet", false, "do not log to stdout")
-	var gc_age = flag.String("gc_age", "-1m", "How old a connection table entry should be before it is garbage collected.")
-	var gc_interval = flag.String("gc_interval", "3m", "How often to run garbage collection.")
+	var gcAge = flag.String("gc_age", "-1m", "How old a connection table entry should be before it is garbage collected.")
+	var gcInterval = flag.String("gc_interval", "3m", "How often to run garbage collection.")
 	var debug = flag.Bool("debug", false, "Enable debug logging")
 
 	flag.Parse()
@@ -470,8 +470,8 @@ func main() {
 
 	logChan := initLogging(*debug)
 
-	go logConn(logChan, !*quiet, *logfile, *kafka_brokers, *kafka_topic)
+	go logConn(logChan, !*quiet, *logFile, *kafkaBrokers, *kafkaTopic)
 
-	doCapture(handle, logChan, *gc_age, *gc_interval)
+	doCapture(handle, logChan, *gcAge, *gcInterval)
 
 }
