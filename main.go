@@ -164,6 +164,26 @@ func RrString(rr layers.DNSResourceRecord) string {
         }
 }
 
+func getIpaddrs(packet gopacket.Packet) (net.IP, net.IP){
+	var srcIP net.IP = nil
+	var dstIP net.IP = nil
+
+	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+		ipData, _ := ipLayer.(*layers.IPv4)
+		srcIP = ipData.SrcIP
+		dstIP = ipData.DstIP
+	} else if ipLayer := packet.Layer(layers.LayerTypeIPv6); ipLayer != nil {
+		ipData, _ := ipLayer.(*layers.IPv6)
+		srcIP = ipData.SrcIP
+		dstIP = ipData.DstIP
+	} else {
+		//non-IP transport?  Ignore this packet
+		log.Debug("Got non-IP packet: " + packet.String())
+	}
+	
+	return srcIP, dstIP
+}
+
 /* validate if DNS, make conntable entry and output
    to log channel if there is a match
 */
@@ -178,23 +198,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 	go cleanDnsCache(&conntable, gc_age, gc_interval)
 
 	for packet := range packets {
-		//TODO: there must be a better way of doing this with gopacket
-		var srcIP net.IP
-		var dstIP net.IP
-
-		if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-			ipData, _ := ipLayer.(*layers.IPv4)
-			srcIP = ipData.SrcIP
-			dstIP = ipData.DstIP
-		} else if ipLayer := packet.Layer(layers.LayerTypeIPv6); ipLayer != nil {
-			ipData, _ := ipLayer.(*layers.IPv6)
-			srcIP = ipData.SrcIP
-			dstIP = ipData.DstIP
-		} else {
-			//non-IP transport?  Ignore this packet
-			log.Debug("Got non-IP packet: " + packet.String())
-			continue
-		}
+        srcIP, dstIP := getIpaddrs(packet)	
 
 		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
 			// Get actual DNS data from this layer
