@@ -356,6 +356,37 @@ func logConnKafka(logC chan dnsLogEntry, kafka_brokers string, kafka_topic strin
 	}
 }
 
+func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle{
+
+	var handle *pcap.Handle
+	var err error
+
+	if dev != "" {
+		handle, err = pcap.OpenLive(dev, 65536, true, pcap.BlockForever)
+		if err != nil {
+			log.Debug(err)
+			return nil
+		}
+	} else if pcapFile != "" {
+		handle, err = pcap.OpenOffline(pcapFile)
+		if err != nil {
+			log.Debug(err)
+			return nil
+		}
+	} else {
+		log.Debug("You must specify either a capture device or a pcap file")
+		return nil
+	}
+
+	err = handle.SetBPFFilter(bpf)
+	if err != nil {
+		log.Debug(err)
+		return nil
+	}
+	
+	return handle
+}
+
 func main() {
 
 	var dev = flag.String("dev", "", "Capture Device")
@@ -371,29 +402,11 @@ func main() {
 
 	flag.Parse()
 
-	var handle *pcap.Handle
-	var err error
+    handle := initHandle(*dev, *pcapFile, *bpf)
 
-	if *dev != "" {
-		handle, err = pcap.OpenLive(*dev, 65536, true, pcap.BlockForever)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else if *pcapFile != "" {
-		handle, err = pcap.OpenOffline(*pcapFile)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		log.Fatal("You must specify either a capture device or a pcap file")
-	}
-
-	defer handle.Close()
-
-	err = handle.SetBPFFilter(*bpf)
-	if err != nil {
-		log.Fatal(err)
-	}
+    if handle == nil {
+        log.Fatal("Could not initilize the capture.")
+    }
 
 	if *debug {
 		log.SetLevel(log.DebugLevel)
