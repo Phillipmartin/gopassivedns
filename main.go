@@ -94,77 +94,77 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, max_age time.Duration, int
 }
 
 /*
-    The gopacket DNS layer doesn't have a lot of good String()
-    conversion methods, so we have to do a lot of that ourselves
-    here.  Much of this should move back into gopacket.  Also a
-    little worried about the perf impact of doing string conversions
-    in this thread...
+   The gopacket DNS layer doesn't have a lot of good String()
+   conversion methods, so we have to do a lot of that ourselves
+   here.  Much of this should move back into gopacket.  Also a
+   little worried about the perf impact of doing string conversions
+   in this thread...
 */
 func TypeString(dnsType layers.DNSType) string {
-    switch dnsType {
-        default:
-        	//take a blind stab...at least this shouldn't *lose* data
-        	return strconv.Itoa(int(dnsType))
-        case layers.DNSTypeA:
-        	return "A"
-        case layers.DNSTypeAAAA:
-        	return "AAAA"
-        case layers.DNSTypeCNAME:
-        	return "CNAME"
-        case layers.DNSTypeMX:
-        	return "MX"
-        case layers.DNSTypeNS:
-        	return "NS"
-        case layers.DNSTypePTR:
-        	return "PTR"
-        case layers.DNSTypeTXT:
-        	return "TXT"
-        case layers.DNSTypeSOA:
-        	return "SOA"
-        case layers.DNSTypeSRV:
-        	return "SRV"
-        case 255: //ANY query per http://tools.ietf.org/html/rfc1035#page-12
-		    return "ANY"
-        }
+	switch dnsType {
+	default:
+		//take a blind stab...at least this shouldn't *lose* data
+		return strconv.Itoa(int(dnsType))
+	case layers.DNSTypeA:
+		return "A"
+	case layers.DNSTypeAAAA:
+		return "AAAA"
+	case layers.DNSTypeCNAME:
+		return "CNAME"
+	case layers.DNSTypeMX:
+		return "MX"
+	case layers.DNSTypeNS:
+		return "NS"
+	case layers.DNSTypePTR:
+		return "PTR"
+	case layers.DNSTypeTXT:
+		return "TXT"
+	case layers.DNSTypeSOA:
+		return "SOA"
+	case layers.DNSTypeSRV:
+		return "SRV"
+	case 255: //ANY query per http://tools.ietf.org/html/rfc1035#page-12
+		return "ANY"
+	}
 }
 
 /*
-    The gopacket DNS layer doesn't have a lot of good String()
-    conversion methods, so we have to do a lot of that ourselves
-    here.  Much of this should move back into gopacket.  Also a
-    little worried about the perf impact of doing string conversions
-    in this thread...
+   The gopacket DNS layer doesn't have a lot of good String()
+   conversion methods, so we have to do a lot of that ourselves
+   here.  Much of this should move back into gopacket.  Also a
+   little worried about the perf impact of doing string conversions
+   in this thread...
 */
 func RrString(rr layers.DNSResourceRecord) string {
-    switch rr.Type {
-        default:
-        	//take a blind stab...at least this shouldn't *lose* data
-        	return string(rr.Data)
-        case layers.DNSTypeA:
-        	return rr.IP.String()
-        case layers.DNSTypeAAAA:
-        	return rr.IP.String()
-        case layers.DNSTypeCNAME:
-        	return string(rr.CNAME)
-        case layers.DNSTypeMX:
-        	//TODO: add the priority
-        	return string(rr.MX.Name)
-        case layers.DNSTypeNS:
-        	return string(rr.NS)
-        case layers.DNSTypePTR:
-        	return string(rr.PTR)
-        case layers.DNSTypeTXT:
-        	return string(rr.TXT)
-        case layers.DNSTypeSOA:
-        	//TODO: rebuild the full SOA string
-        	return string(rr.SOA.RName)
-        case layers.DNSTypeSRV:
-        	//TODO: rebuild the full SRV string
-        	return string(rr.SRV.Name)
-        }
+	switch rr.Type {
+	default:
+		//take a blind stab...at least this shouldn't *lose* data
+		return string(rr.Data)
+	case layers.DNSTypeA:
+		return rr.IP.String()
+	case layers.DNSTypeAAAA:
+		return rr.IP.String()
+	case layers.DNSTypeCNAME:
+		return string(rr.CNAME)
+	case layers.DNSTypeMX:
+		//TODO: add the priority
+		return string(rr.MX.Name)
+	case layers.DNSTypeNS:
+		return string(rr.NS)
+	case layers.DNSTypePTR:
+		return string(rr.PTR)
+	case layers.DNSTypeTXT:
+		return string(rr.TXT)
+	case layers.DNSTypeSOA:
+		//TODO: rebuild the full SOA string
+		return string(rr.SOA.RName)
+	case layers.DNSTypeSRV:
+		//TODO: rebuild the full SRV string
+		return string(rr.SRV.Name)
+	}
 }
 
-func getIpaddrs(packet gopacket.Packet) (net.IP, net.IP){
+func getIpaddrs(packet gopacket.Packet) (net.IP, net.IP) {
 	var srcIP net.IP = nil
 	var dstIP net.IP = nil
 
@@ -180,8 +180,69 @@ func getIpaddrs(packet gopacket.Packet) (net.IP, net.IP){
 		//non-IP transport?  Ignore this packet
 		log.Debug("Got non-IP packet: " + packet.String())
 	}
-	
+
 	return srcIP, dstIP
+}
+
+func initLogEntry(srcIP net.IP, dstIP net.IP, question *layers.DNS, reply *layers.DNS) []dnsLogEntry {
+	var retArray []dnsLogEntry
+
+	/*
+	   http://forums.devshed.com/dns-36/dns-packet-question-section-1-a-183026.html
+	   multiple questions isn't really a thing, so we'll loop over the answers and
+	   insert the question section from the original query.  This means a successful
+	   ANY query may result in a lot of seperate log entries.  The query ID will be
+	   the same on all of those entries, however, so you can rebuild the query that
+	   way.
+
+	   TODO: Also loop through Additional records in addition to Answers
+	*/
+
+	//a response code other than 0 means failure of some kind
+
+	if reply.ResponseCode != 0 {
+
+		tmpEntry := dnsLogEntry{
+			Query_ID:      reply.ID,
+			Question:      string(question.Questions[0].Name),
+			Response_Code: int(reply.ResponseCode),
+			Question_Type: TypeString(question.Questions[0].Type),
+			Answer:        reply.ResponseCode.String(),
+			Answer_Type:   "",
+			TTL:           0,
+			//this is the answer packet, which comes from the server...
+			Server: srcIP,
+			//...and goes to the client
+			Client:    dstIP,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		retArray = append(retArray, tmpEntry)
+
+		return retArray
+
+	} else {
+		for _, answer := range reply.Answers {
+
+			tmpEntry := dnsLogEntry{
+				Query_ID:      reply.ID,
+				Question:      string(question.Questions[0].Name),
+				Response_Code: int(reply.ResponseCode),
+				Question_Type: TypeString(question.Questions[0].Type),
+				Answer:        RrString(answer),
+				Answer_Type:   TypeString(answer.Type),
+				TTL:           answer.TTL,
+				//this is the answer packet, which comes from the server...
+				Server: srcIP,
+				//...and goes to the client
+				Client:    dstIP,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+
+			retArray = append(retArray, tmpEntry)
+		}
+
+		return retArray
+	}
 }
 
 /* validate if DNS, make conntable entry and output
@@ -198,7 +259,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 	go cleanDnsCache(&conntable, gc_age, gc_interval)
 
 	for packet := range packets {
-        srcIP, dstIP := getIpaddrs(packet)	
+		srcIP, dstIP := getIpaddrs(packet)
 
 		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
 			// Get actual DNS data from this layer
@@ -210,7 +271,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 				continue
 			}
 
-            item, found_item := conntable[dns.ID];
+			item, found_item := conntable[dns.ID]
 
 			//this is a Query Response packet
 			if dns.QR && found_item {
@@ -219,57 +280,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 				log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
 				delete(conntable, question.ID)
 
-				/*
-				   http://forums.devshed.com/dns-36/dns-packet-question-section-1-a-183026.html
-				   multiple questions isn't really a thing, so we'll loop over the answers and
-				   insert the question section from the original query.  This means a successful
-				   ANY query may result in a lot of seperate log entries.  The query ID will be
-				   the same on all of those entries, however, so you can rebuild the query that
-				   way.
-
-				   TODO: Also loop through Additional records in addition to Answers
-				*/
-
-				//a response code other than 0 means failure of some kind
-				if dns.ResponseCode != 0 {
-				    
-					logEntry := dnsLogEntry{
-						Query_ID:      dns.ID,
-						Question:      string(question.Questions[0].Name),
-						Response_Code: int(dns.ResponseCode),
-						Question_Type: TypeString(question.Questions[0].Type),
-						Answer:        dns.ResponseCode.String(),
-						Answer_Type:   "",
-						TTL:           0,
-						//this is the answer packet, which comes from the server...
-						Server: srcIP,
-						//...and goes to the client
-						Client:    dstIP,
-						Timestamp: time.Now().UTC().Format(time.RFC3339),
-					}
-
-					logC <- logEntry
-
-					continue
-				}
-
-				for _, answer := range dns.Answers {
-
-					logEntry := dnsLogEntry{
-						Query_ID:      dns.ID,
-						Question:      string(question.Questions[0].Name),
-						Response_Code: int(dns.ResponseCode),
-						Question_Type: TypeString(question.Questions[0].Type),
-						Answer:        RrString(answer),
-						Answer_Type:   TypeString(answer.Type),
-						TTL:           answer.TTL,
-						//this is the answer packet, which comes from the server...
-						Server: srcIP,
-						//...and goes to the client
-						Client:    dstIP,
-						Timestamp: time.Now().UTC().Format(time.RFC3339),
-					}
-
+				for _, logEntry := range initLogEntry(srcIP, dstIP, question, dns) {
 					logC <- logEntry
 				}
 
@@ -356,7 +367,7 @@ func logConnKafka(logC chan dnsLogEntry, kafka_brokers string, kafka_topic strin
 	}
 }
 
-func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle{
+func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle {
 
 	var handle *pcap.Handle
 	var err error
@@ -383,26 +394,26 @@ func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle{
 		log.Debug(err)
 		return nil
 	}
-	
+
 	return handle
 }
 
-func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry, 
-            gc_age string, gc_interval string){
+func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
+	gc_age string, gc_interval string) {
 
-    gc_age_dur, err := time.ParseDuration(gc_age)
-	
+	gc_age_dur, err := time.ParseDuration(gc_age)
+
 	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '-1m'")
 	}
 
 	gc_interval_dur, err := time.ParseDuration(gc_interval)
-	
+
 	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
 	}
-                
-    /* init channels for the packet handlers and kick off handler threads */
+
+	/* init channels for the packet handlers and kick off handler threads */
 	var channels [8]chan gopacket.Packet
 	for i := 0; i < 8; i++ {
 		channels[i] = make(chan gopacket.Packet)
@@ -424,18 +435,17 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	}
 }
 
-func initLogging(debug bool) chan dnsLogEntry{
-    if debug {
+func initLogging(debug bool) chan dnsLogEntry {
+	if debug {
 		log.SetLevel(log.DebugLevel)
 	}
 
 	/* spin up logging channel */
 	var logChan = make(chan dnsLogEntry)
 
-    return logChan
+	return logChan
 
 }
-
 
 func main() {
 
@@ -452,16 +462,16 @@ func main() {
 
 	flag.Parse()
 
-    handle := initHandle(*dev, *pcapFile, *bpf)
+	handle := initHandle(*dev, *pcapFile, *bpf)
 
-    if handle == nil {
-        log.Fatal("Could not initilize the capture.")
-    }
+	if handle == nil {
+		log.Fatal("Could not initilize the capture.")
+	}
 
-    logChan := initLogging(*debug)
+	logChan := initLogging(*debug)
 
 	go logConn(logChan, !*quiet, *logfile, *kafka_brokers, *kafka_topic)
 
-    doCapture(handle, logChan, *gc_age, *gc_interval)
+	doCapture(handle, logChan, *gc_age, *gc_interval)
 
 }
