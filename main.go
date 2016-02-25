@@ -387,6 +387,31 @@ func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle{
 	return handle
 }
 
+func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry, 
+            gc_age_dur time.Duration, gc_interval_dur time.Duration){
+    /* init channels for the packet handlers and kick off handler threads */
+	var channels [8]chan gopacket.Packet
+	for i := 0; i < 8; i++ {
+		channels[i] = make(chan gopacket.Packet)
+		go handlePacket(channels[i], logChan, gc_interval_dur, gc_age_dur)
+	}
+
+	// Use the handle as a packet source to process all packets
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	for packet := range packetSource.Packets() {
+		// Dispatch packets here
+		if net := packet.NetworkLayer(); net != nil {
+			/*  load balance the processiing over 8 threads
+			    FashHash is consistant for A->B and B->A hashes, which simplifies
+			    our connection tracking problem a bit by letting us keep
+			    per-worker connection pools instead of a global pool.
+			*/
+			channels[int(net.NetworkFlow().FastHash())&0x7] <- packet
+		}
+	}
+}
+
+
 func main() {
 
 	var dev = flag.String("dev", "", "Capture Device")
@@ -414,6 +439,7 @@ func main() {
 
 	/* spin up logging thread */
 	var logChan = make(chan dnsLogEntry)
+	go logConn(logChan, !*quiet, *logfile, *kafka_brokers, *kafka_topic)
 
 	gc_age_dur, err := time.ParseDuration(*gc_age)
 	
@@ -427,26 +453,6 @@ func main() {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
 	}
 
-	go logConn(logChan, !*quiet, *logfile, *kafka_brokers, *kafka_topic)
+    doCapture(handle, logChan, gc_age_dur, gc_interval_dur)
 
-	/* init channels for the packet handlers and kick off handler threads */
-	var channels [8]chan gopacket.Packet
-	for i := 0; i < 8; i++ {
-		channels[i] = make(chan gopacket.Packet)
-		go handlePacket(channels[i], logChan, gc_interval_dur, gc_age_dur)
-	}
-
-	// Use the handle as a packet source to process all packets
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
-		// Dispatch packets here
-		if net := packet.NetworkLayer(); net != nil {
-			/*  load balance the processiing over 8 threads
-			    FashHash is consistant for A->B and B->A hashes, which simplifies
-			    our connection tracking problem a bit by letting us keep
-			    per-worker connection pools instead of a global pool.
-			*/
-			channels[int(net.NetworkFlow().FastHash())&0x7] <- packet
-		}
-	}
 }
