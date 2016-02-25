@@ -206,78 +206,79 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 				continue
 			}
 
+
+            item, found_item := conntable[dns.ID];
+
 			//this is a Query Response packet
-			if dns.QR == true {
-				if item, ok := conntable[dns.ID]; ok != false {
-					question := item.entry
-					//We have both legs of the connection, so drop the connection from the table
-					log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
-					delete(conntable, question.ID)
+			if dns.QR && found_item {
+				question := item.entry
+				//We have both legs of the connection, so drop the connection from the table
+				log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
+				delete(conntable, question.ID)
 
-					/*
-					   http://forums.devshed.com/dns-36/dns-packet-question-section-1-a-183026.html
-					   multiple questions isn't really a thing, so we'll loop over the answers and
-					   insert the question section from the original query.  This means a successful
-					   ANY query may result in a lot of seperate log entries.  The query ID will be
-					   the same on all of those entries, however, so you can rebuild the query that
-					   way.
+				/*
+				   http://forums.devshed.com/dns-36/dns-packet-question-section-1-a-183026.html
+				   multiple questions isn't really a thing, so we'll loop over the answers and
+				   insert the question section from the original query.  This means a successful
+				   ANY query may result in a lot of seperate log entries.  The query ID will be
+				   the same on all of those entries, however, so you can rebuild the query that
+				   way.
 
-					   TODO: Also loop through Additional records in addition to Answers
-					*/
+				   TODO: Also loop through Additional records in addition to Answers
+				*/
 
-                    questionType := TypeString(question.Questions[0].Type)
+                questionType := TypeString(question.Questions[0].Type)
 
-					//a response code other than 0 means failure of some kind
-					if dns.ResponseCode != 0 {
+				//a response code other than 0 means failure of some kind
+				if dns.ResponseCode != 0 {
 
-						logEntry := dnsLogEntry{
-							Query_ID:      dns.ID,
-							Question:      string(question.Questions[0].Name),
-							Response_Code: int(dns.ResponseCode),
-							Question_Type: questionType,
-							Answer:        dns.ResponseCode.String(),
-							Answer_Type:   "",
-							TTL:           0,
-							//this is the answer packet, which comes from the server...
-							Server: srcIP,
-							//...and goes to the client
-							Client:    dstIP,
-							Timestamp: time.Now().UTC().Format(time.RFC3339),
-						}
-
-						logC <- logEntry
-
-						continue
+					logEntry := dnsLogEntry{
+						Query_ID:      dns.ID,
+						Question:      string(question.Questions[0].Name),
+						Response_Code: int(dns.ResponseCode),
+						Question_Type: questionType,
+						Answer:        dns.ResponseCode.String(),
+						Answer_Type:   "",
+						TTL:           0,
+						//this is the answer packet, which comes from the server...
+						Server: srcIP,
+						//...and goes to the client
+						Client:    dstIP,
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
 					}
 
-					for _, answer := range dns.Answers {
+					logC <- logEntry
 
-                        answerString := RrString(answer)
-                        typeString := TypeString(answer.Type)
-
-						logEntry := dnsLogEntry{
-							Query_ID:      dns.ID,
-							Question:      string(question.Questions[0].Name),
-							Response_Code: int(dns.ResponseCode),
-							Question_Type: questionType,
-							Answer:        answerString,
-							Answer_Type:   typeString,
-							TTL:           answer.TTL,
-							//this is the answer packet, which comes from the server...
-							Server: srcIP,
-							//...and goes to the client
-							Client:    dstIP,
-							Timestamp: time.Now().UTC().Format(time.RFC3339),
-						}
-
-						logC <- logEntry
-
-					}
-				} else {
-					//This might happen if we get a query ID collision
-					log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
 					continue
 				}
+
+				for _, answer := range dns.Answers {
+
+                    answerString := RrString(answer)
+                    typeString := TypeString(answer.Type)
+
+					logEntry := dnsLogEntry{
+						Query_ID:      dns.ID,
+						Question:      string(question.Questions[0].Name),
+						Response_Code: int(dns.ResponseCode),
+						Question_Type: questionType,
+						Answer:        answerString,
+						Answer_Type:   typeString,
+						TTL:           answer.TTL,
+						//this is the answer packet, which comes from the server...
+						Server: srcIP,
+						//...and goes to the client
+						Client:    dstIP,
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					}
+
+					logC <- logEntry
+				}
+
+			} else if dns.QR && !found_item {
+				//This might happen if we get a query ID collision
+				log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
+				continue
 			} else {
 				//This is the initial query.  save it for later.
 				log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
