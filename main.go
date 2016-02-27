@@ -20,9 +20,10 @@ Plans:
     -code cleanup (e.g. break up handlePacket, switch everything to camelCase)
     stats output
     perf testing
-    TCP flow support
 release v2
 
+	deal with DNS Length header in TCP
+    re-build error handling with panic()/recover()
     syslog logging
     logging to kafka
     add PF_RING support
@@ -245,6 +246,53 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question *layers.DNS, reply *layer
 	}
 }
 
+func getDnsLayer(packet gopacket.Packet) *layers.DNS {
+
+	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
+			return dnsLayer.(*layers.DNS)
+		} else {
+			log.Debug("Got a non-DNS UDP packet")
+			log.Debug(packet.String())
+			return nil
+		}
+	} else if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		/*
+			DNS over TCP prefixes the DNS header with a 2-octet length field.
+			gopacket doesn't handle this at all...and as far as I can tell might
+			not be able to (layer parsers don't seem to be able to see anything
+			about previous layers).
+
+			Additionally, I've yet to find the magic LayerType that gives me a layer
+			called Payload (which is GoPacket for Data we can't parse)..so we do this
+
+			In reality we should actually care about the length field...but that will
+			come later, as we can't actually even parse the response types that are
+			likely to span multiple packets.
+		*/
+		for _, layer := range packet.Layers() {
+			if layer.LayerType().String() == "Payload" {
+				//offset the LayerContents to skip the length field
+				if dnsP := gopacket.NewPacket(layer.LayerContents()[2:], layers.LayerTypeDNS,
+					gopacket.Default); dnsP != nil {
+					return dnsP.Layers()[0].(*layers.DNS)
+				} else {
+					log.Debug("Got a non-DNS TCP packet")
+					log.Debug(packet.String())
+					return nil
+				}
+			}
+		}
+		// non-paylod TCP packets
+		return nil
+	}
+
+	log.Debug("Got a packet that is neither TCP nor UDP")
+	log.Debug(packet.String())
+
+	return nil
+}
+
 /* validate if DNS, make conntable entry and output
    to log channel if there is a match
 */
@@ -260,54 +308,57 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 
 	for packet := range packets {
 		srcIP, dstIP := getIpaddrs(packet)
+		dns := getDnsLayer(packet)
 
-		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
-			// Get actual DNS data from this layer
-			dns, _ := dnsLayer.(*layers.DNS)
+		if dns == nil {
+			continue
+		}
 
-			//skip non-query stuff (Updates, AXFRs, etc)
-			if dns.OpCode != layers.DNSOpCodeQuery {
-				log.Debug("Saw non-update DNS packet: " + packet.String())
-				continue
+		// Get actual DNS data from this layer
+		//dns, _ := dnsLayer.(*layers.DNS)
+
+		//skip non-query stuff (Updates, AXFRs, etc)
+		if dns.OpCode != layers.DNSOpCodeQuery {
+			log.Debug("Saw non-update DNS packet: " + packet.String())
+			continue
+		}
+
+		item, foundItem := conntable[dns.ID]
+
+		//this is a Query Response packet
+		if dns.QR && foundItem {
+			question := item.entry
+			//We have both legs of the connection, so drop the connection from the table
+			log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
+			delete(conntable, question.ID)
+
+			for _, logEntry := range initLogEntry(srcIP, dstIP, question, dns) {
+				logC <- logEntry
 			}
 
-			item, foundItem := conntable[dns.ID]
-
-			//this is a Query Response packet
-			if dns.QR && foundItem {
-				question := item.entry
-				//We have both legs of the connection, so drop the connection from the table
-				log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
-				delete(conntable, question.ID)
-
-				for _, logEntry := range initLogEntry(srcIP, dstIP, question, dns) {
-					logC <- logEntry
-				}
-
-			} else if dns.QR && !foundItem {
-				//This might happen if we get a query ID collision
-				log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
-				continue
-			} else {
-				//This is the initial query.  save it for later.
-				log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
-				mapEntry := dnsMapEntry{
-					entry:    dns,
-					inserted: time.Now(),
-				}
-				conntable[dns.ID] = mapEntry
+		} else if dns.QR && !foundItem {
+			//This might happen if we get a query ID collision
+			log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
+			continue
+		} else {
+			//This is the initial query.  save it for later.
+			log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
+			mapEntry := dnsMapEntry{
+				entry:    dns,
+				inserted: time.Now(),
 			}
+			conntable[dns.ID] = mapEntry
 		}
 	}
 }
 
 //Round-robin log messages to log sinks
-func logConn(logC chan dnsLogEntry, stdout bool,
+func logConn(logC chan dnsLogEntry, quiet bool,
 	filename string, kafkaBrokers string, kafkaTopic string) {
 
 	var logs []chan dnsLogEntry
 
-	if stdout {
+	if !quiet {
 		log.Debug("STDOUT logging enabled")
 		stdoutChan := make(chan dnsLogEntry)
 		logs = append(logs, stdoutChan)
@@ -422,6 +473,9 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 
 	// Use the handle as a packet source to process all packets
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	//only decode packet in response to function calls, this moves the
+	//packet processing to the processing threads
+	packetSource.DecodeOptions = gopacket.Lazy
 	for packet := range packetSource.Packets() {
 		// Dispatch packets here
 		if net := packet.NetworkLayer(); net != nil {
@@ -439,6 +493,8 @@ func initLogging(debug bool) chan dnsLogEntry {
 	if debug {
 		log.SetLevel(log.DebugLevel)
 	}
+
+	//TODO: further logging setup?
 
 	/* spin up logging channel */
 	var logChan = make(chan dnsLogEntry)
@@ -470,8 +526,10 @@ func main() {
 
 	logChan := initLogging(*debug)
 
-	go logConn(logChan, !*quiet, *logFile, *kafkaBrokers, *kafkaTopic)
+	//spin up logging thread(s)
+	go logConn(logChan, *quiet, *logFile, *kafkaBrokers, *kafkaTopic)
 
+	//spin up the actual capture threads
 	doCapture(handle, logChan, *gcAge, *gcInterval)
 
 }
