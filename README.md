@@ -1,27 +1,45 @@
 
-#BETA-ISH QUALITY
-There are missing features in this code.  I don't think it is going to crash and burn at this point, but no promises on performance or long-term stability in the face of actual dns lookups.
+#TODO
 
-# gopassivedns
+   * multi-packet TCP questions and answers are ignored
+   * several types are not defined, and so logged by number instead of name
+   * several types don't log all information (e.g. MX records don't log priority)
+   * no tests yet exist
+   * logging to Kafka and general stats logging is not done
+   * PF_RING integration exists but has not been tested
+   * the use of the query ID as the key in the connection table may lead to collisions
+   * test and fix (as needed) windows support
+
+#gopassivedns
 Network-based DNS logging in Go
 
 ##Summary
+A network-capture based DNS logger, inspired by https://github.com/gamelinux/passivedns.  It uses gopacket to deal with libpcap and packet processing.  It outputs JSON logs.  It is intended to deal with high volume query capture in environments with anywhewre from one to hundreds of DNS resolvers.
 
-a network-capture-based DNS logger, inspired by https://github.com/gamelinux/passivedns.  It uses gopacket to deal with libpcap and packet processing.  It outputs JSON logs.  It is intended to deal with high volume query capture in environments with anywhewre from one to hundreds of DNS resolvers.  Future development work will add a native kafka output channel (in addition to file logging).     
+###Why not use PassiveDNS from gamelinux?
+It's a good choice.  I built this because I believe tasks like involving processing large amounts of untrusted data with lots of poorly documented corner cases should be handled by a managed runtime to prevent memory corruption-style attacks.
+
+###Why not use Bro (or insert other DNS logging IDS here)?
+Also a good choice.  Systems like Bro are generally deployed on network egresses, which has the consequence of masking the real source of the lookup behind your recursive resolvers.  This means you generally need to deploy Bro and do resolver query logging (assuming you can), and integrate logs from both of those into a central logging system to track a lookup back to a client.  gopassivedns was designed to be deployed on your resolvers with no resolver config changes and/or on your network egresses, log centrally via a reliable protocol and parse simply into any log system.  
 
 ###Why not just use resolver query logging?
 Resolver support for query logging, including both the question and answer is spotty at best.  One of the most-deployed DNS servers, BIND, doesn't support it at all.  Others, like Windows DNS, have really horrible log formats.  Additionally, network-based logging will catch queries sent directly to remote servers (e.g. Google DNS) from your clients.
 
 ##Usage
 
-   * -dev device
-   * -bpf bpf filter
-   * -pcap pcap file
-   * -logfile log file
-   * -quiet don't log DNS lookups to STDOUT
-   * -debug enable debug logging to STDOUT
-   * -gc_age  age at which incomplete connections should be garbage collected
-   * -gc_interval  interval at which GC should run on connection table
+   * -dev [device]              network device for capture
+   * -bpf [bpf filter]          BPF filter for capture (default: port 53)
+   * -pcap [file]               pcap file to process
+   * -logfile [file]            log file for DNS lookups (suggested for small deployment or debugging only)
+   * -quiet                     don't log DNS lookups to STDOUT
+   * -debug                     enable debug logging to STDOUT
+   * -gc_age [num]              age at which incomplete connections should be garbage collected (default: -1m)
+   * -gc_interval [num]         interval at which GC should run on connection table (default: 3m)
+   * -kafka_brokers [brokers]   comma-separated list of kafka brokers
+   * -kafka_topic [topic]       kafka topic for logging
+   * -cpuprofile [file]         enable CPU profiling
+   * -numprocs [num]            number of goroutines to use for parsing packet data (default: 8)
+   * -pfring                    use PF_RING for packet capture
 
 You must supply either -dev or -pcap.  
 
@@ -35,9 +53,9 @@ You have 3 choices: deploy it on your resolver(s) or deploy it on your gateway(s
 ###What should I do with the results?
 Right now, I'd recommend using logstash to ship the logs to an elasticsearch cluster.  All the logs are JSON, so this should be pretty easy.  In the future, I will add native kafka support that should make that easier.  I would also suggest using something like HDFS for long term storage and bulk analysis.  DNS queries are an amazing source of internal data!
 
-
 ##Build and install
    * clone this repo
+   * install libpcap, libpcap-dev and PF_RING
    * 'go get'
    * 'go build -o gopassivedns'  (the -o is really just being careful, assuming you cloned the repo you shouldn't need it)
    * 'cp gopassivedns /some/path/to/gopassivedns'
