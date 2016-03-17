@@ -21,18 +21,20 @@ Plans:
     -code cleanup (e.g. break up handlePacket, switch everything to camelCase)
 	deal with DNS Length header in TCP    
     -perf testing
+    generate test pcaps
 release v2
 
+	flesh out more layer types
 	stats output
-    re-build error handling with panic()/recover()
-    syslog logging
-    logging to kafka
-    add PF_RING support
+	logging to kafka
 release v3
 
-    maybe use something with a larger keyspace than the query ID for the conntable map
-    maybe not so many string conversions?
-    add more Types to gopacket
+    re-build error handling with panic()/recover()
+    syslog logging
+    add PF_RING support
+    use something with a larger keyspace than the query ID for the conntable map
+release v4
+
 */
 
 /*
@@ -82,7 +84,11 @@ func (dle *dnsLogEntry) Encode() ([]byte, error) {
   the 'inserted' value is used in connection table cleanup
 */
 type dnsMapEntry struct {
-	entry    layers.DNS
+//	question    []layers.DNS
+//	question_length	 int
+//	answer 	 []layers.DNS
+//	answer_legnth	int
+	entry	layers.DNS
 	inserted time.Time
 }
 
