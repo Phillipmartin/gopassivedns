@@ -13,6 +13,7 @@ import "encoding/binary"
 
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
+import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
 import "github.com/pquerna/ffjson/ffjson"
 /*
@@ -437,13 +438,19 @@ func logConnKafka(logC chan dnsLogEntry, kafkaBrokers string, kafkaTopic string)
 }
 
 //setup a device or pcap file for capture, returns a handle
-func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle {
+func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle {
 
 	var handle *pcap.Handle
 	var err error
 
-	if dev != "" {
+	if dev != "" && !pfring {
 		handle, err = pcap.OpenLive(dev, 65536, true, pcap.BlockForever)
+		if err != nil {
+			log.Debug(err)
+			return nil
+		}
+	} else if dev != "" && pfring {
+		handle, err = pfring.NewRing(dev, 65536, true, pfring.FlagPromisc)
 		if err != nil {
 			log.Debug(err)
 			return nil
@@ -463,6 +470,10 @@ func initHandle(dev string, pcapFile string, bpf string) *pcap.Handle {
 	if err != nil {
 		log.Debug(err)
 		return nil
+	}
+	
+	if dev != "" && pfring {
+		handle.Enable()
 	}
 
 	return handle
@@ -580,6 +591,7 @@ func main() {
 	var debug = flag.Bool("debug", false, "Enable debug logging")
 	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 	var numprocs = flag.Int("numprocs", 8, "number of packet processing threads")
+	var pfring = flag.Bool("pfring", false, "Capture using PF_RING")
 
 	flag.Parse()
 
@@ -592,7 +604,7 @@ func main() {
         defer pprof.StopCPUProfile()
     }
 
-	handle := initHandle(*dev, *pcapFile, *bpf)
+	handle := initHandle(*dev, *pcapFile, *bpf, *pfring)
 
 	if handle == nil {
 		log.Fatal("Could not initilize the capture.")
