@@ -1,15 +1,4 @@
 
-#TODO
-
-   * multi-packet TCP questions and answers are ignored
-   * several types are not defined, and so logged by number instead of name
-   * several types don't log all information (e.g. MX records don't log priority)
-   * no tests yet exist
-   * logging to Kafka and general stats logging is not done
-   * PF_RING integration exists but has not been tested
-   * the use of the query ID as the key in the connection table may lead to collisions
-   * test and fix (as needed) windows support
-
 #gopassivedns
 Network-based DNS logging in Go
 
