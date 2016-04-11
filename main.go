@@ -16,27 +16,6 @@ import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
 import "github.com/pquerna/ffjson/ffjson"
-/*
-Plans:
-
-    -code cleanup (e.g. break up handlePacket, switch everything to camelCase)
-	deal with DNS Length header in TCP    
-    -perf testing
-    generate test pcaps
-release v2
-
-	flesh out more layer types
-	stats output
-	logging to kafka
-release v3
-
-    re-build error handling with panic()/recover()
-    syslog logging
-    add PF_RING support
-    use something with a larger keyspace than the query ID for the conntable map
-release v4
-
-*/
 
 /*
 
@@ -264,7 +243,10 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 	
 	//pre-allocated for initLogEntry
 	logs := []dnsLogEntry{}
-	
+
+
+	//we're constraining the set of layer decoders that gopacket will apply
+	//to this traffic. this MASSIVELY speeds up the parsing phase
 	parser := gopacket.NewDecodingLayerParser(
             layers.LayerTypeEthernet,
             &ethLayer,
@@ -275,6 +257,8 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
             &payload,
         )
 	
+	//this will be used later as part of a hacky solution to the length
+	//field shoehorned at the beginning of a TCP DNS packet
 	dnsParser := gopacket.NewDecodingLayerParser(
             layers.LayerTypeDNS,
             &dns,
@@ -285,11 +269,14 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 
 	for packet := range packets {
 		
+		//we're intentionally ignoring the errors that DecodeLayers will
+		//return if it can't parse an entire packet.  We check the list of
+		//discovered layers to work through a couple of possible error states.
 		parser.DecodeLayers(packet.Data(), &foundLayerTypes)
 		
 		if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) && 
 			!foundLayerType(gopacket.LayerTypePayload, foundLayerTypes){
-			//TCP control packet, skip
+			//TCP packet with no payload. control packet. skip.
 			continue
 		}
 		
@@ -333,9 +320,10 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 			continue
 		}
 
+		//lookup the query ID in our connection table
 		item, foundItem := conntable[dns.ID]
 
-		//this is a Query Response packet
+		//this is a Query Response packet and we saw the question go out...
 		if dns.QR && foundItem {
 			question := item.entry
 			//We have both legs of the connection, so drop the connection from the table
@@ -352,7 +340,8 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 			}
 
 		} else if dns.QR && !foundItem {
-			//This might happen if we get a query ID collision
+			//this is a query response, but we didn't see the question 
+			//(or we aged the question out of conntable)
 			log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
 			continue
 		} else {
@@ -367,7 +356,7 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 	}
 }
 
-//Round-robin log messages to log sinks
+//Spin up required logging threads and then round-robin log messages to log sinks
 func logConn(logC chan dnsLogEntry, quiet bool,
 	filename string, kafkaBrokers string, kafkaTopic string) {
 
