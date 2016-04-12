@@ -13,7 +13,7 @@ import "encoding/binary"
 
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
-import "github.com/google/gopacket/pfring"
+//import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
 import "github.com/pquerna/ffjson/ffjson"
 
@@ -439,11 +439,12 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 			return nil
 		}
 	} else if dev != "" && pfring {
-		handle, err = pfring.NewRing(dev, 65536, true, pfring.FlagPromisc)
+/*		handle, err = pfring.NewRing(dev, 65536, true, pfring.FlagPromisc)
 		if err != nil {
 			log.Debug(err)
 			return nil
 		}
+	*/
 	} else if pcapFile != "" {
 		handle, err = pcap.OpenOffline(pcapFile)
 		if err != nil {
@@ -461,9 +462,10 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 		return nil
 	}
 	
-	if dev != "" && pfring {
+/*	if dev != "" && pfring {
 		handle.Enable()
 	}
+*/
 
 	return handle
 }
