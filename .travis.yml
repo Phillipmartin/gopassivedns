@@ -4,4 +4,5 @@ before_install:
 - sudo apt-get install -y libpcap0.8 libpcap0.8-dev
 go:
   - 1.5
+  - 1.6
   - tip
