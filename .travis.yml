@@ -1,7 +1,7 @@
 language: go
 before_install:
 - sudo apt-get update -qq
-- sudo apt-get install -y libpcap libpcap-dev
+- sudo apt-get install -y libpcap0.8 libpcap0.8-dev
 go:
   - 1.5
   - tip
