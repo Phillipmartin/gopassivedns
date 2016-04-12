@@ -9,7 +9,7 @@ import "net"
 import "os"
 import "bufio"
 import "runtime/pprof"
-import "encoding/binary"
+//import "encoding/binary"
 
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
@@ -64,14 +64,20 @@ func (dle *dnsLogEntry) Encode() ([]byte, error) {
   the 'inserted' value is used in connection table cleanup
 */
 type dnsMapEntry struct {
-//	question    []layers.DNS
-//	question_length	 int
-//	answer 	 []layers.DNS
-//	answer_legnth	int
 	entry	layers.DNS
 	inserted time.Time
 }
 
+type tcpDataStruct struct {
+	DnsData []byte
+	IpLayer	layers.IPv4
+}
+
+type packetData struct {
+	Packet gopacket.Packet
+	Tcpdata tcpDataStruct
+	Type string
+}
 
 /*
    The gopacket DNS layer doesn't have a lot of good String()
@@ -220,12 +226,23 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, inte
 	}
 }
 
+/*
+TODO:
+x	create global reassembled channel
+	create the various stream/factory/etc stuff, on full reassembly insert into global channel
+	use packetData struct instead of Packets
+	convert doCapture to a select-based loop between packet channel and reassemble channel
+*/
+
+var reassembleChan = make(chan tcpDataStruct)
+
+
 /* validate if DNS packet, make conntable entry and output
    to log channel if there is a match
    
    we pass packet by value here because we turned on ZeroCopy for the capture, which reuses the capture buffer
 */
-func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
+func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 	gcInterval time.Duration, gcAge time.Duration) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
@@ -269,89 +286,78 @@ func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
 
 	for packet := range packets {
 		
+		//used for testing
+		if packet.Type == "stop" {
+			return
+		}
+		
 		//we're intentionally ignoring the errors that DecodeLayers will
 		//return if it can't parse an entire packet.  We check the list of
 		//discovered layers to work through a couple of possible error states.
-		parser.DecodeLayers(packet.Data(), &foundLayerTypes)
 		
-		if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) && 
-			!foundLayerType(gopacket.LayerTypePayload, foundLayerTypes){
-			//TCP packet with no payload. control packet. skip.
+		var srcIP net.IP
+		var dstIP net.IP
+		
+		if packet.Type == "packet" {
+			parser.DecodeLayers(packet.Packet.Data(), &foundLayerTypes)
+			srcIP = ipLayer.SrcIP 
+			dstIP = ipLayer.DstIP
+		}else if packet.Type == "tcp" {
+			dnsParser.DecodeLayers(packet.Tcpdata.DnsData, &foundLayerTypes)
+			srcIP = packet.Tcpdata.IpLayer.SrcIP 
+			dstIP = packet.Tcpdata.IpLayer.DstIP
+		}else{
+			log.Debug("Got a channel entry with no data!")
 			continue
 		}
 		
-		//TODO: Actually use the legnth field and store response if it's less than the length
-		
-		//If we have a TCP packet with a payload fix our offset and re-parse
-		if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) &&  
-			foundLayerType(gopacket.LayerTypePayload, foundLayerTypes){
-			//in DNS over TCP a 16 bit length field is prepended to the packet
-			//gopacket utterly fails at handling this case, so we help it out.
-			
-			//for the future int(payload[:2]) is the total legnth of the response
-			//the legnth is the length of the packet in bytes -2 (for the 2 length bytes)
-			err := dnsParser.DecodeLayers(payload[2:], &foundLayerTypes)
-			
-			if err != nil {
-        		log.Debug("Trouble decoding TCP DNS layers: ", err)
-            	log.Debug("Packet: "+packet.String())
-            	continue
-        	}
-        	
-        	if len(payload)-2 != int(binary.BigEndian.Uint16(payload[:8])) {
-        		log.Debug("multi-packet DNS response found but not yet implemented")
-        	}
-		}
-		
-		//If we have a packet that's not DNS but DOES have a payload
-		//Debug it and move on
-		if !foundLayerType(layers.LayerTypeDNS, foundLayerTypes) && 
-			foundLayerType(gopacket.LayerTypePayload, foundLayerTypes){
-			log.Debug("Got a packet with a payload but without a DNS Layer: "+packet.String())
+		if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) {
+			//assembler.AssembleWithTimestamp(ipLayer.NetworkFlow(), tcpLayer, packet.Metadata().Timestamp)
+			log.Debug("Saw TCP Packet")
 			continue
 		}
 		
-		srcIP := ipLayer.SrcIP 
-		dstIP := ipLayer.DstIP
+		if foundLayerType(layers.LayerTypeDNS, foundLayerTypes){
 		
-		//skip non-query stuff (Updates, AXFRs, etc)
-		if dns.OpCode != layers.DNSOpCodeQuery {
-			log.Debug("Saw non-update DNS packet: " + packet.String())
-			continue
-		}
-
-		//lookup the query ID in our connection table
-		item, foundItem := conntable[dns.ID]
-
-		//this is a Query Response packet and we saw the question go out...
-		if dns.QR && foundItem {
-			question := item.entry
-			//We have both legs of the connection, so drop the connection from the table
-			//log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
-			delete(conntable, question.ID)
-			
-			logs = nil
-			initLogEntry(srcIP, dstIP, question, dns, &logs)
-
-			//TODO: send the array itself, not the elements of the array
-			//to reduce the number of channel transactions
-			for _, logEntry := range logs {
-				logC <- logEntry
+			//skip non-query stuff (Updates, AXFRs, etc)
+			if dns.OpCode != layers.DNSOpCodeQuery {
+				log.Debug("Saw non-update DNS packet")
+				continue
 			}
 
-		} else if dns.QR && !foundItem {
-			//this is a query response, but we didn't see the question 
-			//(or we aged the question out of conntable)
-			log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
-			continue
-		} else {
-			//This is the initial query.  save it for later.
-			//log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
-			mapEntry := dnsMapEntry{
-				entry:    dns,
-				inserted: time.Now(),
+			//lookup the query ID in our connection table
+			item, foundItem := conntable[dns.ID]
+
+			//this is a Query Response packet and we saw the question go out...
+			if dns.QR && foundItem {
+				question := item.entry
+				//We have both legs of the connection, so drop the connection from the table
+				//log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
+				delete(conntable, question.ID)
+			
+				logs = nil
+				initLogEntry(srcIP, dstIP, question, dns, &logs)
+
+				//TODO: send the array itself, not the elements of the array
+				//to reduce the number of channel transactions
+				for _, logEntry := range logs {
+					logC <- logEntry
+				}
+
+			} else if dns.QR && !foundItem {
+				//this is a query response, but we didn't see the question 
+				//(or we aged the question out of conntable)
+				log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
+				continue
+			} else {
+				//This is the initial query.  save it for later.
+				//log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
+				mapEntry := dnsMapEntry{
+					entry:    dns,
+					inserted: time.Now(),
+				}
+				conntable[dns.ID] = mapEntry
 			}
-			conntable[dns.ID] = mapEntry
 		}
 	}
 }
@@ -497,9 +503,9 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	}
 
 	/* init channels for the packet handlers and kick off handler threads */
-	var channels []chan gopacket.Packet
+	var channels []chan packetData
 	for i := 0; i < numprocs; i++ {
-		channels = append(channels, make(chan gopacket.Packet, 100))
+		channels = append(channels, make(chan packetData, 100))
 	}
 
 	for i := 0; i < numprocs; i++ {
@@ -535,22 +541,27 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	
 	foundLayerTypes := []gopacket.LayerType{}
 
-	for packet := range packetSource.Packets() {
-		/*  load balance the processiing over N threads
-		    FashHash is consistant for A->B and B->A hashes, which simplifies
-		    our connection tracking problem a bit by letting us keep
-		    per-worker connection pools instead of a global pool.
-		*/
-			
-		parser.DecodeLayers(packet.Data(), &foundLayerTypes)
+	channelData := packetData{}
+
+	for {
 		
-		if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
-			channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- packet
-		}else{
-    		log.Debug("Saw a non-IPv4 Packet: "+packet.String())
+		select{
+			case reassembledTcp := <- reassembleChan:
+				ipLayer = reassembledTcp.IpLayer
+				channelData.Tcpdata = reassembledTcp
+				channelData.Type = "tcp"
+				channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
+			case packet := <- packetSource.Packets():
+				parser.DecodeLayers(packet.Data(), &foundLayerTypes)
+				channelData.Packet = packet
+				channelData.Type = "packet"
+				if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
+					channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
+				}
 		}
-    	
+
 	}
+
 }
 
 //setup logging settings

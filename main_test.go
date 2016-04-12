@@ -1,19 +1,21 @@
 package main
 
 import "testing"
-import log "github.com/Sirupsen/logrus"
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/layers"
 import "time"
 import "net"
 
+/*
+Utility functions
+
+*/
 func getPacketData(which string) *gopacket.PacketSource {
     var pcapFile string = "data/"+which+".pcap"
 
     handle, err := pcap.OpenOffline(pcapFile)
 	if err != nil {
-		log.Debug(err)
 		return nil
 	}
     
@@ -37,6 +39,24 @@ func getDNSLayers(which string) []*layers.DNS {
     return ret
 
 }
+
+func ToSlice(c chan dnsLogEntry) []dnsLogEntry {
+    s := make([]dnsLogEntry, 0)
+
+    for{
+        select{
+            case i := <- c:
+                s = append(s, i)
+            case <-time.After(time.Second):
+                return s
+        }
+    }    
+}
+
+/*
+Benchmarking functions
+
+*/
 
 func BenchmarkALogEntry(b *testing.B) {
     var srcIP net.IP = net.ParseIP("1.1.1.1")
@@ -120,32 +140,43 @@ func BenchmarkDecodeToDNS(b *testing.B) {
 	
 }
 
-//func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
-//	gcInterval time.Duration, gcAge time.Duration)
+func BenchmarkHandleUDPPackets(b *testing.B){
+    gcAge, _ := time.ParseDuration("-1m")
+	gcInterval, _ := time.ParseDuration("3m")
+    
+    var packetChan = make(chan packetData, 101)
+    var logChan = make(chan dnsLogEntry)
+
+	go func (){for{<- logChan}}()
+	
+	b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        b.StopTimer()
+        //print(".")
+        packetSource := getPacketData("100_udp_lookups")
+	    packetSource.DecodeOptions.Lazy = true
+	    for packet := range packetSource.Packets() {
+	        packetChan <- packetData{Packet: packet, Type: "packet"}
+	    }
+	    packetChan <- packetData{Type: "stop"}
+	    
+	    //print(".")
+	    b.StartTimer()
+	    handlePacket(packetChan, logChan, gcInterval, gcAge)
+    }
+
+}
 
 /*
-type dnsLogEntry struct {
-	Query_ID      uint16 `json:"query_id"`
-	Response_Code int    `json:"response_code"`
-	Question      string `json:"question"`
-	Question_Type string `json:"question_type"`
-	Answer        string `json:"answer"`
-	Answer_Type   string `json:"answer_type"`
-	TTL           uint32 `json:"ttl"`
-	Server        net.IP `json:"server"`
-	Client        net.IP `json:"client"`
-	Timestamp     string `json:"timestamp"`
+Tests
 
-	encoded []byte //to hold the marshaled data structure
-	err     error  //encoding errors
-}
 */
 
 func TestParseA(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge)
@@ -153,7 +184,7 @@ func TestParseA(t *testing.T){
     packetSource := getPacketData("a")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -219,7 +250,7 @@ func TestParseAAAA(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge)
@@ -227,7 +258,7 @@ func TestParseAAAA(t *testing.T){
     packetSource := getPacketData("aaaa")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -292,7 +323,7 @@ func TestParseNS(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge)
@@ -300,7 +331,7 @@ func TestParseNS(t *testing.T){
     packetSource := getPacketData("ns")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -364,7 +395,7 @@ func TestParseMX(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge)
@@ -372,7 +403,7 @@ func TestParseMX(t *testing.T){
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -431,7 +462,66 @@ func TestParseMX(t *testing.T){
     }      
 }
 
+func TestParseMultipleUDPPackets(t *testing.T){
+    gcAge, _ := time.ParseDuration("-1m")
+	gcInterval, _ := time.ParseDuration("3m")
+    
+     //if I don't specify 6 here, this test stalls putting packets into the channel.
+     //so strange.
+    var packetChan = make(chan packetData, 6)
+    var logChan = make(chan dnsLogEntry)
+
+    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    
+    packetSource := getPacketData("multiple_udp")
+	packetSource.DecodeOptions.Lazy = true
+	for packet := range packetSource.Packets() {
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	}
+	
+	logs := ToSlice(logChan)
+
+	if len(logs) != 3 {
+            //if we have more than 3 log messages, we miss-parsed
+            t.Fatalf("There were %d log messages, expecting 3", len(logs))
+        }
+        
+        //validate values of log struct
+        if logs[2].Query_ID != 0xb967 {
+            t.Fatalf("Bad Query ID %d, expecting %d\n",logs[2].Query_ID,0x6f87)
+        }
+        
+        if logs[2].Response_Code != 0 {
+            t.Fatalf("Bad Response code %d, expecting 0\n", logs[2].Response_Code)
+        }
+        
+        if logs[2].Question != "www.fark.com"  {
+            t.Fatalf("Bad question %s, expecting google.com\n", logs[2].Question)
+        }
+        
+        if logs[2].Question_Type != "A"  {
+            t.Fatalf("Bad question type %s, expecting MX\n", logs[2].Question_Type)
+        }
+        
+        if logs[2].Answer != "64.191.171.200"  {
+            t.Fatalf("Bad answer %s, expecting alt3.aspmx.l.google.com\n", logs[2].Answer)
+        }
+        
+        if logs[2].Answer_Type != "A"  {
+            t.Fatalf("Bad answer type %s, expecting MX\n", logs[2].Answer_Type)
+        }
+        
+        if logs[2].TTL != 600  {
+            t.Fatalf("Bad TTL %d, expecting 567", logs[2].TTL)
+        }
+	
+}
+
 /*
+func TestParseMultipleTCPPackets(*testing.T){
+
+}
+
 func TestParseSRV(*testing.T){
     
 }
@@ -461,7 +551,7 @@ func TestConntableGC(t *testing.T){
     gcAge, _ := time.ParseDuration("-5s")
 	gcInterval, _ := time.ParseDuration("5s")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge)
@@ -469,7 +559,7 @@ func TestConntableGC(t *testing.T){
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	    time.Sleep(time.Duration(11)*time.Second)
 	}
 	
@@ -501,5 +591,20 @@ func TestUDPNotDNS(*testing.T){
 func TestTCPMultiPakcet(*testing.T){
     
 }
+
+func TestInitHandlePcap(t *testing.T){
+    
+}
+
+func TestInitHandleDev(t *testing.T){
+    
+}
+
+func TestInitLogging(t *testing.T){
+
+}
+
+
+
 */
 
