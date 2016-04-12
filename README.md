@@ -1,4 +1,7 @@
 
+[![Coverage Status](https://coveralls.io/repos/github/Phillipmartin/gopassivedns/badge.svg?branch=master)](https://coveralls.io/github/Phillipmartin/gopassivedns?branch=master)
+[![Build Status](https://travis-ci.org/Phillipmartin/gopassivedns.svg?branch=master)](https://travis-ci.org/Phillipmartin/gopassivedns)
+
 #gopassivedns
 Network-based DNS logging in Go
 
