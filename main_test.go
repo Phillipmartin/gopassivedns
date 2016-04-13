@@ -4,6 +4,7 @@ import "testing"
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/layers"
+import "os/user"
 import "time"
 import "net"
 
@@ -633,19 +634,60 @@ func TestTCPMultiPakcet(*testing.T){
     
 }
 
+*/
+
+//func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle
+
 func TestInitHandlePcap(t *testing.T){
-    
+    handle := initHandle("", "data/a.pcap", "port 53", false)
+    if handle == nil {
+        t.Fatal("Error while building handle for data/a.pcap!")
+    }
+    handle.Close()
+}
+
+func TestInitHandleFail(t *testing.T){
+    handle := initHandle("", "", "port 53", false)
+    if handle != nil {
+        t.Fatal("initHandle did not error out without a dev or a pcap!")
+    }
+}
+
+func TestInitHandleBadBPF(t *testing.T){
+    handle := initHandle("", "data/a.pcap", "asdf", false)
+    if handle != nil {
+        t.Fatal("initHandle did not fail with an invalid BPF filter")
+    }
 }
 
 func TestInitHandleDev(t *testing.T){
     
+    if u, err := user.Current();  err != nil || u.Username != "root" {
+        t.Skip("We're not root, so we can't open devices for capture")
+    }
+    
+    devices, err := pcap.FindAllDevs()
+    if err != nil {
+        t.Log(err)
+        return
+    }
+
+    t.Log(devices)
+    
+    for _, device := range devices {
+        handle := initHandle(device.Name, "", "port 53", false)
+        if handle == nil {
+            t.Logf("Error while building handle for %s", device.Name)
+        }
+    }
 }
 
+/*
 func TestInitLogging(t *testing.T){
 
 }
-
-
-
 */
+
+
+
 

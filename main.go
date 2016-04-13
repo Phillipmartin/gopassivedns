@@ -228,10 +228,8 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, inte
 
 /*
 TODO:
-x	create global reassembled channel
 	create the various stream/factory/etc stuff, on full reassembly insert into global channel
-	use packetData struct instead of Packets
-	convert doCapture to a select-based loop between packet channel and reassemble channel
+
 */
 
 var reassembleChan = make(chan tcpDataStruct)
@@ -312,6 +310,7 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 		}
 		
 		if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) {
+			//TODO: kick off TCP reassembly
 			//assembler.AssembleWithTimestamp(ipLayer.NetworkFlow(), tcpLayer, packet.Metadata().Timestamp)
 			log.Debug("Saw TCP Packet")
 			continue
@@ -555,11 +554,15 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 		
 	//we then signal each of the packet handler threads to stop.  Each thread
 	//will then exit.
+	
+	//last, we wait up to 3 seconds for the outgoing log queue to drain.
 		if done > 3 {
+			log.Debug("Shutting down!")
 			for i := 0; i < numprocs; i++ {
 				channels[i] <- packetData{Type:"stop"}
 			}
 			
+			log.Debug("waiting for log pipeline to flush...")
 			for len(logChan) > 0 {
 				done--
 				if done == 0{
@@ -568,6 +571,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 				}
 				time.Sleep(time.Second)
 			}
+			log.Debug("Done!  Goodbye.")
 		}
 		
 		select{
