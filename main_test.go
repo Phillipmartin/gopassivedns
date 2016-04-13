@@ -541,9 +541,11 @@ func TestDoCaptureUDP(t *testing.T){
     
     doCapture(handle, logChan, "-1m", "3m", 8, reChan)
     
-    //logs := ToSlice(logChan)
+    logs := ToSlice(logChan)
     
-    //t.Log(len(logs))
+    if len(logs) != 50 {
+        t.Fatalf("Expecting 50 logs, got %d", len(logs))
+    }
 
 }
 
