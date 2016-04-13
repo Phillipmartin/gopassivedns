@@ -22,6 +22,17 @@ func getPacketData(which string) *gopacket.PacketSource {
     return gopacket.NewPacketSource(handle, handle.LinkType())
 }
 
+func getHandle(which string) *pcap.Handle {
+    var pcapFile string = "data/"+which+".pcap"
+
+    handle, err := pcap.OpenOffline(pcapFile)
+	if err != nil {
+		return nil
+	}
+	
+	return handle
+}
+
 func getDNSLayers(which string) []*layers.DNS {
     
     var ret []*layers.DNS
@@ -518,6 +529,34 @@ func TestParseMultipleUDPPackets(t *testing.T){
 }
 
 /*
+doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
+	gcAge string, gcInterval string, numprocs int) {
+*/
+
+func TestDoCaptureUDP(t *testing.T){
+    
+    handle := getHandle("100_udp_lookups")
+    var logChan = make(chan dnsLogEntry, 100)
+    var reChan = make(chan tcpDataStruct)
+    
+    doCapture(handle, logChan, "-1m", "3m", 8, reChan)
+    
+    //logs := ToSlice(logChan)
+    
+    //t.Log(len(logs))
+
+}
+
+/*
+func TestDoCaptureTCP(*testing.T){
+    
+}
+
+func TestDoCaptureMixed(*testing.T){
+    
+}
+
+
 func TestParseMultipleTCPPackets(*testing.T){
 
 }

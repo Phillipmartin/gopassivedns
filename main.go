@@ -286,7 +286,7 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 
 	for packet := range packets {
 		
-		//used for testing
+		//used for clean shutdowns
 		if packet.Type == "stop" {
 			return
 		}
@@ -488,7 +488,7 @@ func foundLayerType(layer gopacket.LayerType, found []gopacket.LayerType) bool{
 
 //kick off packet procesing threads and start the packet capture loop
 func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
-	gcAge string, gcInterval string, numprocs int) {
+	gcAge string, gcInterval string, numprocs int, reChan chan tcpDataStruct) {
 
 	gcAgeDur, err := time.ParseDuration(gcAge)
 
@@ -543,21 +543,52 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 
 	channelData := packetData{}
 
+	
+	var done int = 0
+
 	for {
+	
+	//we want to give the TCP reassembly side time to drain
+	//so we let the pcap handle return nil 3 times before exiting the function
+	//sleeping for a second in between iterations, hopefully giving time
+	//for the stream reassembly side of things to drain before we exit.
+		
+	//we then signal each of the packet handler threads to stop.  Each thread
+	//will then exit.
+		if done > 3 {
+			for i := 0; i < numprocs; i++ {
+				channels[i] <- packetData{Type:"stop"}
+			}
+			
+			for len(logChan) > 0 {
+				done--
+				if done == 0{
+					log.Debug("exited with messages remaining in log queue!")
+					return
+				}
+				time.Sleep(time.Second)
+			}
+		}
 		
 		select{
-			case reassembledTcp := <- reassembleChan:
+			case reassembledTcp := <- reChan:
 				ipLayer = reassembledTcp.IpLayer
 				channelData.Tcpdata = reassembledTcp
 				channelData.Type = "tcp"
 				channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
 			case packet := <- packetSource.Packets():
-				parser.DecodeLayers(packet.Data(), &foundLayerTypes)
-				channelData.Packet = packet
-				channelData.Type = "packet"
-				if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
-					channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
+				if packet == nil{
+					done++
+					time.Sleep(time.Second)
+				}else{
+					parser.DecodeLayers(packet.Data(), &foundLayerTypes)
+					channelData.Packet = packet
+					channelData.Type = "packet"
+					if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
+						channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
+					}
 				}
+				
 		}
 
 	}
@@ -618,6 +649,6 @@ func main() {
 	go logConn(logChan, *quiet, *logFile, *kafkaBrokers, *kafkaTopic)
 
 	//spin up the actual capture threads
-	doCapture(handle, logChan, *gcAge, *gcInterval, *numprocs)
+	doCapture(handle, logChan, *gcAge, *gcInterval, *numprocs, reassembleChan)
 
 }
