@@ -7,12 +7,15 @@ import "strconv"
 import "time"
 import "net"
 import "os"
+import "io"
 import "bufio"
 import "runtime/pprof"
-//import "encoding/binary"
+import "encoding/binary"
 
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
+import "github.com/google/gopacket/tcpassembly"
+import "github.com/google/gopacket/tcpassembly/tcpreader"
 //import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
 import "github.com/pquerna/ffjson/ffjson"
@@ -70,7 +73,8 @@ type dnsMapEntry struct {
 
 type tcpDataStruct struct {
 	DnsData []byte
-	IpLayer	layers.IPv4
+	IpLayer	gopacket.Flow
+	Length	int
 }
 
 type packetData struct {
@@ -210,7 +214,7 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 //background task to clear out stale entries in the conntable
 //one of these gets spun up for every packet handling thread
 //takes a pointer to the contable to clean, the maximum age of an entry and how often to run GC
-func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, interval time.Duration) {
+func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, interval time.Duration, threadNum int) {
 
 	for {
 		time.Sleep(interval)
@@ -219,7 +223,7 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, inte
 		cleanupCutoff := time.Now().Add(maxAge)
 		for key, item := range *conntable {
 			if item.inserted.Before(cleanupCutoff) {
-				log.Debug("conntable GC: cleanup query ID " + strconv.Itoa(int(key)))
+				log.Debug("conntable GC("+strconv.Itoa(threadNum)+"): cleanup query ID " + strconv.Itoa(int(key)))
 				delete(*conntable, key)
 			}
 		}
@@ -232,8 +236,58 @@ TODO:
 
 */
 
-var reassembleChan = make(chan tcpDataStruct)
+var reassembleChan chan tcpDataStruct
 
+type dnsStreamFactory struct{}
+
+// httpStream will handle the actual decoding of http requests.
+type dnsStream struct {
+	net, transport gopacket.Flow
+	r              tcpreader.ReaderStream
+}
+
+func (d *dnsStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+	dstream := &dnsStream{
+		net:       net,
+		transport: transport,
+		r:         tcpreader.NewReaderStream(),
+	}
+	go dstream.run() // Important... we must guarantee that data from the reader stream is read.
+
+	// ReaderStream implements tcpassembly.Stream, so we can return a pointer to it.
+	return &dstream.r
+}
+
+func (d *dnsStream) run() {
+	var data []byte
+	var tmp = make([]byte, 4096)
+	
+	
+	//_="breakpoint"
+	//buf := bufio.NewReader(&d.r)
+	for {
+		count, err := d.r.Read(tmp)
+		
+		if err == io.EOF {
+			log.Debug("EOF")
+			reassembleChan <- tcpDataStruct{
+				DnsData: data[2:int(binary.BigEndian.Uint16(data[:2]))+2], 
+				IpLayer: d.net,
+				Length: int(binary.BigEndian.Uint16(data[:2])),
+			}
+			log.Debug("EOF2")
+			return
+		}else if err != nil {
+			log.Debug("Error when reading DNS buf: ", err)
+		}else if count > 0 {
+			
+			data = append(data, tmp...)
+		
+		}else{
+		//	_="breakpoint"
+		}
+	}
+}
 
 /* validate if DNS packet, make conntable entry and output
    to log channel if there is a match
@@ -241,13 +295,13 @@ var reassembleChan = make(chan tcpDataStruct)
    we pass packet by value here because we turned on ZeroCopy for the capture, which reuses the capture buffer
 */
 func handlePacket(packets chan packetData, logC chan dnsLogEntry,
-	gcInterval time.Duration, gcAge time.Duration) {
+	gcInterval time.Duration, gcAge time.Duration, threadNum int) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
 	var conntable = make(map[uint16]dnsMapEntry)
 
 	//setup garbage collection for this map
-	go cleanDnsCache(&conntable, gcAge, gcInterval)
+	go cleanDnsCache(&conntable, gcAge, gcInterval, threadNum)
 
 	var ethLayer layers.Ethernet
     var ipLayer  layers.IPv4
@@ -282,81 +336,100 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 	
 	foundLayerTypes := []gopacket.LayerType{}
 
-	for packet := range packets {
-		
-		//used for clean shutdowns
-		if packet.Type == "stop" {
-			return
-		}
-		
-		//we're intentionally ignoring the errors that DecodeLayers will
-		//return if it can't parse an entire packet.  We check the list of
-		//discovered layers to work through a couple of possible error states.
-		
-		var srcIP net.IP
-		var dstIP net.IP
-		
-		if packet.Type == "packet" {
-			parser.DecodeLayers(packet.Packet.Data(), &foundLayerTypes)
-			srcIP = ipLayer.SrcIP 
-			dstIP = ipLayer.DstIP
-		}else if packet.Type == "tcp" {
-			dnsParser.DecodeLayers(packet.Tcpdata.DnsData, &foundLayerTypes)
-			srcIP = packet.Tcpdata.IpLayer.SrcIP 
-			dstIP = packet.Tcpdata.IpLayer.DstIP
-		}else{
-			log.Debug("Got a channel entry with no data!")
-			continue
-		}
-		
-		if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) {
-			//TODO: kick off TCP reassembly
-			//assembler.AssembleWithTimestamp(ipLayer.NetworkFlow(), tcpLayer, packet.Metadata().Timestamp)
-			log.Debug("Saw TCP Packet")
-			continue
-		}
-		
-		if foundLayerType(layers.LayerTypeDNS, foundLayerTypes){
-		
-			//skip non-query stuff (Updates, AXFRs, etc)
-			if dns.OpCode != layers.DNSOpCodeQuery {
-				log.Debug("Saw non-update DNS packet")
-				continue
-			}
+	//TCP reassembly init
+	streamFactory := &dnsStreamFactory{}
+	streamPool := tcpassembly.NewStreamPool(streamFactory)
+	assembler := tcpassembly.NewAssembler(streamPool)
+	ticker := time.Tick(time.Minute)
 
-			//lookup the query ID in our connection table
-			item, foundItem := conntable[dns.ID]
-
-			//this is a Query Response packet and we saw the question go out...
-			if dns.QR && foundItem {
-				question := item.entry
-				//We have both legs of the connection, so drop the connection from the table
-				//log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(question.ID)))
-				delete(conntable, question.ID)
-			
-				logs = nil
-				initLogEntry(srcIP, dstIP, question, dns, &logs)
-
-				//TODO: send the array itself, not the elements of the array
-				//to reduce the number of channel transactions
-				for _, logEntry := range logs {
-					logC <- logEntry
+	for{
+		select{
+			case packet := <- packets:
+		
+				//used for clean shutdowns
+				if packet.Type == "stop" {
+					return
+				}else if packet.Type == "flush" {
+					count:=assembler.FlushAll()
+					log.Debug("(thread "+strconv.Itoa(threadNum)+") flushed "+strconv.Itoa(count)+" connections")
+					continue
 				}
-
-			} else if dns.QR && !foundItem {
-				//this is a query response, but we didn't see the question 
-				//(or we aged the question out of conntable)
-				log.Debug("Got a Query Response and can't find a query for ID " + strconv.Itoa(int(dns.ID)))
-				continue
-			} else {
-				//This is the initial query.  save it for later.
-				//log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
-				mapEntry := dnsMapEntry{
-					entry:    dns,
-					inserted: time.Now(),
+				
+				//we're intentionally ignoring the errors that DecodeLayers will
+				//return if it can't parse an entire packet.  We check the list of
+				//discovered layers to work through a couple of possible error states.
+				
+				var srcIP net.IP
+				var dstIP net.IP
+				
+				if packet.Type == "packet" {
+					parser.DecodeLayers(packet.Packet.Data(), &foundLayerTypes)
+					srcIP = ipLayer.SrcIP 
+					dstIP = ipLayer.DstIP
+				}else if packet.Type == "tcp" {
+					if len(packet.Tcpdata.DnsData) != packet.Tcpdata.Length {
+						log.Debugf("Got TCP data of length %d, expecting %d", len(packet.Tcpdata.DnsData), packet.Tcpdata.Length)
+					}
+					dnsParser.DecodeLayers(packet.Tcpdata.DnsData, &foundLayerTypes)
+					srcIP = net.IP(packet.Tcpdata.IpLayer.Src().Raw())
+					dstIP = net.IP(packet.Tcpdata.IpLayer.Dst().Raw())
+				}else{
+					log.Debug("Got a channel entry with no data!")
+					continue
 				}
-				conntable[dns.ID] = mapEntry
-			}
+				
+				if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) {
+					assembler.AssembleWithTimestamp(ipLayer.NetworkFlow(), &tcpLayer, packet.Packet.Metadata().Timestamp)
+					continue
+				}
+				
+				if foundLayerType(layers.LayerTypeDNS, foundLayerTypes){
+				
+					//skip non-query stuff (Updates, AXFRs, etc)
+					if dns.OpCode != layers.DNSOpCodeQuery {
+						log.Debug("Saw non-update DNS packet")
+						continue
+					}
+		
+					//lookup the query ID in our connection table
+					item, foundItem := conntable[dns.ID]
+		
+					//this is a Query Response packet and we saw the question go out...
+					//if we saw a leg of this already...
+					if foundItem {
+						//do I need this?
+						logs = nil
+						//if we just got the reply 
+						if dns.QR {
+							log.Debug("(thread "+strconv.Itoa(threadNum)+") Got 'answer' leg of query ID: " + strconv.Itoa(int(dns.ID)))
+							initLogEntry(srcIP, dstIP, item.entry, dns, &logs)
+						} else {
+							//we just got the question, so we should already have the reply
+							log.Debug("(thread "+strconv.Itoa(threadNum)+") Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
+							initLogEntry(srcIP, dstIP, dns, item.entry, &logs)
+						}
+						delete(conntable, dns.ID)
+					
+						//TODO: send the array itself, not the elements of the array
+						//to reduce the number of channel transactions
+						for _, logEntry := range logs {
+							logC <- logEntry
+						}
+					}else{
+						//This is the initial query.  save it for later.
+						log.Debug("(thread "+strconv.Itoa(threadNum)+") Got a leg of query ID " + strconv.Itoa(int(dns.ID)))
+						mapEntry := dnsMapEntry{
+							entry:    dns,
+							inserted: time.Now(),
+						}
+						conntable[dns.ID] = mapEntry
+					}
+				}else{
+					log.Debug("Missing a DNS layer?")
+				}
+			case <-ticker:
+				// Every minute, flush connections that haven't seen activity in the past 2 minutes.
+				assembler.FlushOlderThan(time.Now().Add(time.Minute * -2))
 		}
 	}
 }
@@ -449,7 +522,7 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 			log.Debug(err)
 			return nil
 		}
-	*/
+*/
 	} else if pcapFile != "" {
 		handle, err = pcap.OpenOffline(pcapFile)
 		if err != nil {
@@ -501,6 +574,9 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
 	}
 
+	//setup the global channel for reassembled TCP streams
+	reassembleChan = reChan
+
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan packetData
 	for i := 0; i < numprocs; i++ {
@@ -508,7 +584,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	}
 
 	for i := 0; i < numprocs; i++ {
-		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur)
+		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur, i)
 	}
 
 	// Use the handle as a packet source to process all packets
@@ -542,62 +618,75 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 
 	channelData := packetData{}
 
-	
-	var done int = 0
-
+CAPTURE:
 	for {
-	
-	//we want to give the TCP reassembly side time to drain
-	//so we let the pcap handle return nil 3 times before exiting the function
-	//sleeping for a second in between iterations, hopefully giving time
-	//for the stream reassembly side of things to drain before we exit.
-		
-	//we then signal each of the packet handler threads to stop.  Each thread
-	//will then exit.
-	
-	//last, we wait up to 3 seconds for the outgoing log queue to drain.
-		if done > 3 {
-			log.Debug("Shutting down!")
-			for i := 0; i < numprocs; i++ {
-				channels[i] <- packetData{Type:"stop"}
-			}
-			
-			log.Debug("waiting for log pipeline to flush...")
-			for len(logChan) > 0 {
-				done--
-				if done == 0{
-					log.Debug("exited with messages remaining in log queue!")
-					return
-				}
-				time.Sleep(time.Second)
-			}
-			log.Debug("Done!  Goodbye.")
-		}
-		
 		select{
 			case reassembledTcp := <- reChan:
-				ipLayer = reassembledTcp.IpLayer
+				log.Debug("sending TCP")
 				channelData.Tcpdata = reassembledTcp
 				channelData.Type = "tcp"
-				channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
+				channels[int(reassembledTcp.IpLayer.FastHash()) & (numprocs-1)] <- channelData
 			case packet := <- packetSource.Packets():
-				if packet == nil{
-					done++
-					time.Sleep(time.Second)
-				}else{
+				if packet != nil{
+					log.Debug("sending packet")
 					parser.DecodeLayers(packet.Data(), &foundLayerTypes)
 					channelData.Packet = packet
 					channelData.Type = "packet"
 					if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
 						channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
 					}
+				} else{ 
+					log.Debug("packet is nil")
+					break CAPTURE
 				}
-				
 		}
-
 	}
 
+	gracefulShutdown(channels, reChan, logChan)
+
 }
+	
+func gracefulShutdown(channels []chan packetData, reChan chan tcpDataStruct, logChan chan dnsLogEntry)	{
+
+	var wait_time int = 3
+	channelData := packetData{}
+	var numprocs int = len(channels)
+	
+	log.Debug("Flushing channels...")
+	for i := 0; i < numprocs; i++ {
+		channels[i] <- packetData{Type:"flush"}
+	}
+	log.Debug("Draining TCP data...")
+	
+	OUTER:
+	for {
+		select{
+			case reassembledTcp := <- reChan:
+				channelData.Tcpdata = reassembledTcp
+				channelData.Type = "tcp"
+				channels[int(reassembledTcp.IpLayer.FastHash()) & (numprocs-1)] <- channelData
+			case <- time.After(3*time.Second):
+				break OUTER
+		}
+	}
+	
+	log.Debug("Stopping packet processing...")
+	for i := 0; i < numprocs; i++ {
+		channels[i] <- packetData{Type:"stop"}
+	}
+	
+	log.Debug("waiting for log pipeline to flush...")
+
+	for len(logChan) > 0 {
+		wait_time--
+		if wait_time == 0{
+			log.Debug("exited with messages remaining in log queue!")
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+	
 
 //setup logging settings
 func initLogging(debug bool) chan dnsLogEntry {
@@ -649,10 +738,15 @@ func main() {
 
 	logChan := initLogging(*debug)
 
+	reChan := make(chan tcpDataStruct, 1000)
+
 	//spin up logging thread(s)
 	go logConn(logChan, *quiet, *logFile, *kafkaBrokers, *kafkaTopic)
 
 	//spin up the actual capture threads
-	doCapture(handle, logChan, *gcAge, *gcInterval, *numprocs, reassembleChan)
+	doCapture(handle, logChan, *gcAge, *gcInterval, *numprocs, reChan)
+
+	log.Debug("Done!  Goodbye.")
+	os.Exit(0)
 
 }

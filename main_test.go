@@ -174,7 +174,7 @@ func BenchmarkHandleUDPPackets(b *testing.B){
 	    
 	    //print(".")
 	    b.StartTimer()
-	    handlePacket(packetChan, logChan, gcInterval, gcAge)
+	    handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     }
 
 }
@@ -191,7 +191,7 @@ func TestParseA(t *testing.T){
     var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("a")
 	packetSource.DecodeOptions.Lazy = true
@@ -265,7 +265,7 @@ func TestParseAAAA(t *testing.T){
     var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("aaaa")
 	packetSource.DecodeOptions.Lazy = true
@@ -338,7 +338,7 @@ func TestParseNS(t *testing.T){
     var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("ns")
 	packetSource.DecodeOptions.Lazy = true
@@ -410,7 +410,7 @@ func TestParseMX(t *testing.T){
     var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
@@ -483,7 +483,7 @@ func TestParseMultipleUDPPackets(t *testing.T){
     var packetChan = make(chan packetData, 6)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("multiple_udp")
 	packetSource.DecodeOptions.Lazy = true
@@ -529,6 +529,7 @@ func TestParseMultipleUDPPackets(t *testing.T){
 	
 }
 
+
 /*
 doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	gcAge string, gcInterval string, numprocs int) {
@@ -550,10 +551,23 @@ func TestDoCaptureUDP(t *testing.T){
 
 }
 
-/*
-func TestDoCaptureTCP(*testing.T){
+func TestDoCaptureTCP(t *testing.T){
     
+    handle := getHandle("100_tcp_lookups")
+    var logChan = make(chan dnsLogEntry, 400)
+    var reChan = make(chan tcpDataStruct, 1000)
+    
+    doCapture(handle, logChan, "-1m", "3m", 8, reChan)
+    
+    logs := ToSlice(logChan)
+    
+    if len(logs) != 300 {
+        t.Fatalf("Expecting 300 logs, got %d", len(logs))
+    }
+
 }
+
+/*
 
 func TestDoCaptureMixed(*testing.T){
     
@@ -596,7 +610,7 @@ func TestConntableGC(t *testing.T){
     var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
@@ -644,6 +658,13 @@ func TestInitHandlePcap(t *testing.T){
         t.Fatal("Error while building handle for data/a.pcap!")
     }
     handle.Close()
+}
+
+func TestInitHandlePcapFail(t *testing.T){
+    handle := initHandle("", "data/doesnotexist.pcap", "port 53", false)
+    if handle != nil {
+        t.Fatal("initHandle did not error when given an invalid pcap")
+    }
 }
 
 func TestInitHandleFail(t *testing.T){
