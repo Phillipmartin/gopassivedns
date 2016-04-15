@@ -71,17 +71,81 @@ type dnsMapEntry struct {
 	inserted time.Time
 }
 
+/*
+  struct to store reassembled TCP streams
+*/
 type tcpDataStruct struct {
 	DnsData []byte
 	IpLayer	gopacket.Flow
 	Length	int
 }
 
+/*
+  struct to store either reassembled TCP streams or packets
+  Type will be tcp or packet for those type
+  or it can be 'flush' or 'stop' to signal packet handling threads
+*/
 type packetData struct {
 	Packet gopacket.Packet
 	Tcpdata tcpDataStruct
 	Type string
 }
+
+/*
+  global channel to recieve reassembled TCP streams
+  consumed in doCapture
+*/
+var reassembleChan chan tcpDataStruct
+
+/*
+  TCP reassembly stuff, all the work is done in run()
+*/
+
+type dnsStreamFactory struct{}
+
+type dnsStream struct {
+	net, transport gopacket.Flow
+	r              tcpreader.ReaderStream
+}
+
+func (d *dnsStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+	dstream := &dnsStream{
+		net:       net,
+		transport: transport,
+		r:         tcpreader.NewReaderStream(),
+	}
+	go dstream.run() // Important... we must guarantee that data from the reader stream is read.
+
+	// ReaderStream implements tcpassembly.Stream, so we can return a pointer to it.
+	return &dstream.r
+}
+
+func (d *dnsStream) run() {
+	var data []byte
+	var tmp = make([]byte, 4096)
+	
+	for {
+		count, err := d.r.Read(tmp)
+		
+		if err == io.EOF {  
+			//we must read to EOF, so we also use it as a signal to send the reassembed
+			//stream into the channel
+			reassembleChan <- tcpDataStruct{
+				DnsData: data[2:int(binary.BigEndian.Uint16(data[:2]))+2], 
+				IpLayer: d.net,
+				Length: int(binary.BigEndian.Uint16(data[:2])),
+			}
+			return
+		}else if err != nil {
+			log.Debug("Error when reading DNS buf: ", err)
+		}else if count > 0 {
+			
+			data = append(data, tmp...)
+		
+		}
+	}
+}
+
 
 /*
    The gopacket DNS layer doesn't have a lot of good String()
@@ -226,60 +290,6 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, inte
 				log.Debug("conntable GC("+strconv.Itoa(threadNum)+"): cleanup query ID " + strconv.Itoa(int(key)))
 				delete(*conntable, key)
 			}
-		}
-	}
-}
-
-/*
-TODO:
-	create the various stream/factory/etc stuff, on full reassembly insert into global channel
-
-*/
-
-var reassembleChan chan tcpDataStruct
-
-type dnsStreamFactory struct{}
-
-// httpStream will handle the actual decoding of http requests.
-type dnsStream struct {
-	net, transport gopacket.Flow
-	r              tcpreader.ReaderStream
-}
-
-func (d *dnsStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	dstream := &dnsStream{
-		net:       net,
-		transport: transport,
-		r:         tcpreader.NewReaderStream(),
-	}
-	go dstream.run() // Important... we must guarantee that data from the reader stream is read.
-
-	// ReaderStream implements tcpassembly.Stream, so we can return a pointer to it.
-	return &dstream.r
-}
-
-func (d *dnsStream) run() {
-	var data []byte
-	var tmp = make([]byte, 4096)
-	
-	for {
-		count, err := d.r.Read(tmp)
-		
-		if err == io.EOF {
-			log.Debug("EOF")
-			reassembleChan <- tcpDataStruct{
-				DnsData: data[2:int(binary.BigEndian.Uint16(data[:2]))+2], 
-				IpLayer: d.net,
-				Length: int(binary.BigEndian.Uint16(data[:2])),
-			}
-			log.Debug("EOF2")
-			return
-		}else if err != nil {
-			log.Debug("Error when reading DNS buf: ", err)
-		}else if count > 0 {
-			
-			data = append(data, tmp...)
-		
 		}
 	}
 }
@@ -617,13 +627,11 @@ CAPTURE:
 	for {
 		select{
 			case reassembledTcp := <- reChan:
-				log.Debug("sending TCP")
 				channelData.Tcpdata = reassembledTcp
 				channelData.Type = "tcp"
 				channels[int(reassembledTcp.IpLayer.FastHash()) & (numprocs-1)] <- channelData
 			case packet := <- packetSource.Packets():
 				if packet != nil{
-					log.Debug("sending packet")
 					parser.DecodeLayers(packet.Data(), &foundLayerTypes)
 					channelData.Packet = packet
 					channelData.Type = "packet"
@@ -631,7 +639,7 @@ CAPTURE:
 						channels[int(ipLayer.NetworkFlow().FastHash()) & (numprocs-1)] <- channelData
 					}
 				} else{ 
-					log.Debug("packet is nil")
+					log.Debug("packetSource returned nil.")
 					break CAPTURE
 				}
 		}
@@ -733,7 +741,7 @@ func main() {
 
 	logChan := initLogging(*debug)
 
-	reChan := make(chan tcpDataStruct, 1000)
+	reChan := make(chan tcpDataStruct)
 
 	//spin up logging thread(s)
 	go logConn(logChan, *quiet, *logFile, *kafkaBrokers, *kafkaTopic)
