@@ -1,23 +1,37 @@
 package main
 
 import "testing"
-import log "github.com/Sirupsen/logrus"
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/layers"
+import "os/user"
 import "time"
 import "net"
 
+/*
+Utility functions
+
+*/
 func getPacketData(which string) *gopacket.PacketSource {
     var pcapFile string = "data/"+which+".pcap"
 
     handle, err := pcap.OpenOffline(pcapFile)
 	if err != nil {
-		log.Debug(err)
 		return nil
 	}
     
     return gopacket.NewPacketSource(handle, handle.LinkType())
+}
+
+func getHandle(which string) *pcap.Handle {
+    var pcapFile string = "data/"+which+".pcap"
+
+    handle, err := pcap.OpenOffline(pcapFile)
+	if err != nil {
+		return nil
+	}
+	
+	return handle
 }
 
 func getDNSLayers(which string) []*layers.DNS {
@@ -37,6 +51,24 @@ func getDNSLayers(which string) []*layers.DNS {
     return ret
 
 }
+
+func ToSlice(c chan dnsLogEntry) []dnsLogEntry {
+    s := make([]dnsLogEntry, 0)
+
+    for{
+        select{
+            case i := <- c:
+                s = append(s, i)
+            case <-time.After(time.Second):
+                return s
+        }
+    }    
+}
+
+/*
+Benchmarking functions
+
+*/
 
 func BenchmarkALogEntry(b *testing.B) {
     var srcIP net.IP = net.ParseIP("1.1.1.1")
@@ -120,40 +152,51 @@ func BenchmarkDecodeToDNS(b *testing.B) {
 	
 }
 
-//func handlePacket(packets chan gopacket.Packet, logC chan dnsLogEntry,
-//	gcInterval time.Duration, gcAge time.Duration)
+func BenchmarkHandleUDPPackets(b *testing.B){
+    gcAge, _ := time.ParseDuration("-1m")
+	gcInterval, _ := time.ParseDuration("3m")
+    
+    var packetChan = make(chan packetData, 101)
+    var logChan = make(chan dnsLogEntry)
+
+	go func (){for{<- logChan}}()
+	
+	b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        b.StopTimer()
+        //print(".")
+        packetSource := getPacketData("100_udp_lookups")
+	    packetSource.DecodeOptions.Lazy = true
+	    for packet := range packetSource.Packets() {
+	        packetChan <- packetData{Packet: packet, Type: "packet"}
+	    }
+	    packetChan <- packetData{Type: "stop"}
+	    
+	    //print(".")
+	    b.StartTimer()
+	    handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+    }
+
+}
 
 /*
-type dnsLogEntry struct {
-	Query_ID      uint16 `json:"query_id"`
-	Response_Code int    `json:"response_code"`
-	Question      string `json:"question"`
-	Question_Type string `json:"question_type"`
-	Answer        string `json:"answer"`
-	Answer_Type   string `json:"answer_type"`
-	TTL           uint32 `json:"ttl"`
-	Server        net.IP `json:"server"`
-	Client        net.IP `json:"client"`
-	Timestamp     string `json:"timestamp"`
+Tests
 
-	encoded []byte //to hold the marshaled data structure
-	err     error  //encoding errors
-}
 */
 
 func TestParseA(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("a")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -219,15 +262,15 @@ func TestParseAAAA(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("aaaa")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -292,15 +335,15 @@ func TestParseNS(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("ns")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -364,15 +407,15 @@ func TestParseMX(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	}
 
     select {
@@ -431,7 +474,178 @@ func TestParseMX(t *testing.T){
     }      
 }
 
+func TestParseNXDOMAIN(t *testing.T){
+    gcAge, _ := time.ParseDuration("-1m")
+	gcInterval, _ := time.ParseDuration("3m")
+    
+    var packetChan = make(chan packetData)
+    var logChan = make(chan dnsLogEntry)
+
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+    
+    packetSource := getPacketData("nxdomain")
+	packetSource.DecodeOptions.Lazy = true
+	for packet := range packetSource.Packets() {
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	}
+
+    logs := ToSlice(logChan)
+    
+    if len(logs) > 1{
+        t.Fatalf("Expecting a single log, got %d", len(logs))
+    }
+    
+    log := logs[0]
+    
+
+    //validate values of log struct
+    if log.Query_ID != 0xb369 {
+        t.Fatalf("Bad Query ID %d, expecting %d\n",log.Query_ID,0xb369)
+    }
+    
+    if log.Response_Code != 3 {
+        t.Fatalf("Bad Response code %d, expecting 3\n", log.Response_Code)
+    }
+    
+    if log.Question != "asdtartfgeasf.asdfgsdf.com"  {
+        t.Fatalf("Bad question %s, expecting asdtartfgeasf.asdfgsdf.com\n", log.Question)
+    }
+    
+    if log.Question_Type != "A"  {
+        t.Fatalf("Bad question type %s, expecting A\n", log.Question_Type)
+    }
+    
+    if log.Answer != "Non-Existent Domain"  {
+        t.Fatalf("Bad answer %s, expecting Non-Existent Domain\n", log.Answer)
+    }
+    
+    if log.Answer_Type != ""  {
+        t.Fatalf("Bad answer type %s, expecting an empty string\n", log.Answer_Type)
+    }
+    
+    if log.TTL != 0  {
+        t.Fatalf("Bad TTL %d, expecting 0", log.TTL)
+    }
+    
+/*        if log.Server !=  {
+        t.Fatal("")
+    }
+    
+    if log.Client !=  {
+        t.Fatal("")
+    }*/
+    
+    //parse the JSON and make sure it works
+    log.Encode()
+    if log.encoded == nil || log.err != nil {
+        t.Fatal("log marshaling error!")
+    }
+}
+
+func TestParseMultipleUDPPackets(t *testing.T){
+    gcAge, _ := time.ParseDuration("-1m")
+	gcInterval, _ := time.ParseDuration("3m")
+    
+     //if I don't specify 6 here, this test stalls putting packets into the channel.
+     //so strange.
+    var packetChan = make(chan packetData, 6)
+    var logChan = make(chan dnsLogEntry)
+
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+    
+    packetSource := getPacketData("multiple_udp")
+	packetSource.DecodeOptions.Lazy = true
+	for packet := range packetSource.Packets() {
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	}
+	
+	logs := ToSlice(logChan)
+
+	if len(logs) != 3 {
+            //if we have more than 3 log messages, we miss-parsed
+            t.Fatalf("There were %d log messages, expecting 3", len(logs))
+        }
+        
+        //validate values of log struct
+        if logs[2].Query_ID != 0xb967 {
+            t.Fatalf("Bad Query ID %d, expecting %d\n",logs[2].Query_ID,0x6f87)
+        }
+        
+        if logs[2].Response_Code != 0 {
+            t.Fatalf("Bad Response code %d, expecting 0\n", logs[2].Response_Code)
+        }
+        
+        if logs[2].Question != "www.fark.com"  {
+            t.Fatalf("Bad question %s, expecting google.com\n", logs[2].Question)
+        }
+        
+        if logs[2].Question_Type != "A"  {
+            t.Fatalf("Bad question type %s, expecting MX\n", logs[2].Question_Type)
+        }
+        
+        if logs[2].Answer != "64.191.171.200"  {
+            t.Fatalf("Bad answer %s, expecting alt3.aspmx.l.google.com\n", logs[2].Answer)
+        }
+        
+        if logs[2].Answer_Type != "A"  {
+            t.Fatalf("Bad answer type %s, expecting MX\n", logs[2].Answer_Type)
+        }
+        
+        if logs[2].TTL != 600  {
+            t.Fatalf("Bad TTL %d, expecting 567", logs[2].TTL)
+        }
+	
+}
+
+
 /*
+doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
+	gcAge string, gcInterval string, numprocs int) {
+*/
+
+func TestDoCaptureUDP(t *testing.T){
+    
+    handle := getHandle("100_udp_lookups")
+    var logChan = make(chan dnsLogEntry, 100)
+    var reChan = make(chan tcpDataStruct)
+    
+    doCapture(handle, logChan, "-1m", "3m", 8, reChan)
+    
+    logs := ToSlice(logChan)
+    
+    if len(logs) != 50 {
+        t.Fatalf("Expecting 50 logs, got %d", len(logs))
+    }
+
+}
+
+func TestDoCaptureTCP(t *testing.T){
+    
+    handle := getHandle("100_tcp_lookups")
+    var logChan = make(chan dnsLogEntry, 400)
+    var reChan = make(chan tcpDataStruct, 1000)
+    
+    doCapture(handle, logChan, "-1m", "3m", 8, reChan)
+    
+    logs := ToSlice(logChan)
+    
+    if len(logs) != 300 {
+        t.Fatalf("Expecting 300 logs, got %d", len(logs))
+    }
+
+}
+
+/*
+
+func TestDoCaptureMixed(*testing.T){
+    
+}
+
+
+func TestParseMultipleTCPPackets(*testing.T){
+
+}
+
 func TestParseSRV(*testing.T){
     
 }
@@ -461,15 +675,15 @@ func TestConntableGC(t *testing.T){
     gcAge, _ := time.ParseDuration("-5s")
 	gcInterval, _ := time.ParseDuration("5s")
     
-    var packetChan = make(chan gopacket.Packet)
+    var packetChan = make(chan packetData)
     var logChan = make(chan dnsLogEntry)
 
-    go handlePacket(packetChan, logChan, gcInterval, gcAge)
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
     
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packet
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
 	    time.Sleep(time.Duration(11)*time.Second)
 	}
 	
@@ -501,5 +715,68 @@ func TestUDPNotDNS(*testing.T){
 func TestTCPMultiPakcet(*testing.T){
     
 }
+
 */
+
+//func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle
+
+func TestInitHandlePcap(t *testing.T){
+    handle := initHandle("", "data/a.pcap", "port 53", false)
+    if handle == nil {
+        t.Fatal("Error while building handle for data/a.pcap!")
+    }
+    handle.Close()
+}
+
+func TestInitHandlePcapFail(t *testing.T){
+    handle := initHandle("", "data/doesnotexist.pcap", "port 53", false)
+    if handle != nil {
+        t.Fatal("initHandle did not error when given an invalid pcap")
+    }
+}
+
+func TestInitHandleFail(t *testing.T){
+    handle := initHandle("", "", "port 53", false)
+    if handle != nil {
+        t.Fatal("initHandle did not error out without a dev or a pcap!")
+    }
+}
+
+func TestInitHandleBadBPF(t *testing.T){
+    handle := initHandle("", "data/a.pcap", "asdf", false)
+    if handle != nil {
+        t.Fatal("initHandle did not fail with an invalid BPF filter")
+    }
+}
+
+func TestInitHandleDev(t *testing.T){
+    
+    if u, err := user.Current();  err != nil || u.Username != "root" {
+        t.Skip("We're not root, so we can't open devices for capture")
+    }
+    
+    devices, err := pcap.FindAllDevs()
+    if err != nil {
+        t.Log(err)
+        return
+    }
+
+    t.Log(devices)
+    
+    for _, device := range devices {
+        handle := initHandle(device.Name, "", "port 53", false)
+        if handle == nil {
+            t.Logf("Error while building handle for %s", device.Name)
+        }
+    }
+}
+
+/*
+func TestInitLogging(t *testing.T){
+
+}
+*/
+
+
+
 
