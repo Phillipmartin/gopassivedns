@@ -294,6 +294,56 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, inte
 	}
 }
 
+func handleDns(conntable *map[uint16]dnsMapEntry, dns layers.DNS, logC chan dnsLogEntry,
+	srcIP net.IP, dstIP net.IP) {
+	//skip non-query stuff (Updates, AXFRs, etc)
+	if dns.OpCode != layers.DNSOpCodeQuery {
+		log.Debug("Saw non-query DNS packet")
+	}
+
+	//other checks should go here.
+
+
+	//pre-allocated for initLogEntry
+	logs := []dnsLogEntry{}
+
+	//lookup the query ID in our connection table
+	item, foundItem := (*conntable)[dns.ID]
+
+	//this is a Query Response packet and we saw the question go out...
+	//if we saw a leg of this already...
+	if foundItem {
+		//do I need this?
+		logs = nil
+		//if we just got the reply 
+		if dns.QR {
+			log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(dns.ID)))
+			initLogEntry(srcIP, dstIP, item.entry, dns, &logs)
+		} else {
+			//we just got the question, so we should already have the reply
+			log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
+			initLogEntry(srcIP, dstIP, dns, item.entry, &logs)
+		}
+		delete(*conntable, dns.ID)
+	
+		//TODO: send the array itself, not the elements of the array
+		//to reduce the number of channel transactions
+		for _, logEntry := range logs {
+			logC <- logEntry
+		}
+		
+	}else{
+		//This is the initial query.  save it for later.
+		log.Debug("Got a leg of query ID " + strconv.Itoa(int(dns.ID)))
+		mapEntry := dnsMapEntry{
+			entry:    dns,
+			inserted: time.Now(),
+		}
+		(*conntable)[dns.ID] = mapEntry
+		
+	}
+}
+
 /* validate if DNS packet, make conntable entry and output
    to log channel if there is a match
    
@@ -315,10 +365,6 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
     var dns layers.DNS
     var payload gopacket.Payload
 	
-	//pre-allocated for initLogEntry
-	logs := []dnsLogEntry{}
-
-
 	//we're constraining the set of layer decoders that gopacket will apply
 	//to this traffic. this MASSIVELY speeds up the parsing phase
 	parser := gopacket.NewDecodingLayerParser(
@@ -331,8 +377,7 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
             &payload,
         )
 	
-	//this will be used later as part of a hacky solution to the length
-	//field shoehorned at the beginning of a TCP DNS packet
+	//for parsing the reassembled TCP streams
 	dnsParser := gopacket.NewDecodingLayerParser(
             layers.LayerTypeDNS,
             &dns,
@@ -383,53 +428,16 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 					continue
 				}
 				
+				//All TCP goes to reassemble.  This is first because a single packet DNS request will parse as DNS
+				//But that will leave the connection hanging around in memory, because the inital handshake won't
+				//parse as DNS, nor will the connection closing.
 				if foundLayerType(layers.LayerTypeTCP, foundLayerTypes) {
 					assembler.AssembleWithTimestamp(ipLayer.NetworkFlow(), &tcpLayer, packet.Packet.Metadata().Timestamp)
 					continue
-				}
-				
-				if foundLayerType(layers.LayerTypeDNS, foundLayerTypes){
-				
-					//skip non-query stuff (Updates, AXFRs, etc)
-					if dns.OpCode != layers.DNSOpCodeQuery {
-						log.Debug("Saw non-update DNS packet")
-						continue
-					}
-		
-					//lookup the query ID in our connection table
-					item, foundItem := conntable[dns.ID]
-		
-					//this is a Query Response packet and we saw the question go out...
-					//if we saw a leg of this already...
-					if foundItem {
-						//do I need this?
-						logs = nil
-						//if we just got the reply 
-						if dns.QR {
-							log.Debug("(thread "+strconv.Itoa(threadNum)+") Got 'answer' leg of query ID: " + strconv.Itoa(int(dns.ID)))
-							initLogEntry(srcIP, dstIP, item.entry, dns, &logs)
-						} else {
-							//we just got the question, so we should already have the reply
-							log.Debug("(thread "+strconv.Itoa(threadNum)+") Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
-							initLogEntry(srcIP, dstIP, dns, item.entry, &logs)
-						}
-						delete(conntable, dns.ID)
-					
-						//TODO: send the array itself, not the elements of the array
-						//to reduce the number of channel transactions
-						for _, logEntry := range logs {
-							logC <- logEntry
-						}
-					}else{
-						//This is the initial query.  save it for later.
-						log.Debug("(thread "+strconv.Itoa(threadNum)+") Got a leg of query ID " + strconv.Itoa(int(dns.ID)))
-						mapEntry := dnsMapEntry{
-							entry:    dns,
-							inserted: time.Now(),
-						}
-						conntable[dns.ID] = mapEntry
-					}
+				}else if foundLayerType(layers.LayerTypeDNS, foundLayerTypes){
+					handleDns(&conntable, dns, logC, srcIP, dstIP)
 				}else{
+					//UDP and doesn't parse as DNS?
 					log.Debug("Missing a DNS layer?")
 				}
 			case <-ticker:
