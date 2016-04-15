@@ -1,14 +1,12 @@
 package main
 
 import "flag"
-import "fmt"
 import log "github.com/Sirupsen/logrus"
 import "strconv"
 import "time"
 import "net"
 import "os"
 import "io"
-import "bufio"
 import "runtime/pprof"
 import "encoding/binary"
 
@@ -18,49 +16,14 @@ import "github.com/google/gopacket/tcpassembly"
 import "github.com/google/gopacket/tcpassembly/tcpreader"
 //import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
-import "github.com/pquerna/ffjson/ffjson"
+
 
 /*
 
 Structs and helper functions
 
-DNS log entry struct and helper functions
-
 */
-type dnsLogEntry struct {
-	Query_ID      uint16 `json:"query_id"`
-	Response_Code int    `json:"response_code"`
-	Question      string `json:"question"`
-	Question_Type string `json:"question_type"`
-	Answer        string `json:"answer"`
-	Answer_Type   string `json:"answer_type"`
-	TTL           uint32 `json:"ttl"`
-	Server        net.IP `json:"server"`
-	Client        net.IP `json:"client"`
-	Timestamp     string `json:"timestamp"`
 
-	encoded []byte //to hold the marshaled data structure
-	err     error  //encoding errors
-}
-
-//private, idempotent function that ensures the json is encoded
-func (dle *dnsLogEntry) ensureEncoded() {
-	if dle.encoded == nil && dle.err == nil {
-		dle.encoded, dle.err = ffjson.Marshal(dle)
-	}
-}
-
-//returns length of the encoded JSON
-func (dle *dnsLogEntry) Length() int {
-	dle.ensureEncoded()
-	return len(dle.encoded)
-}
-
-//public method to encode the string
-func (dle *dnsLogEntry) Encode() ([]byte, error) {
-	dle.ensureEncoded()
-	return dle.encoded, dle.err
-}
 
 /*
   struct for DNS connection table entry
@@ -146,77 +109,6 @@ func (d *dnsStream) run() {
 	}
 }
 
-
-/*
-   The gopacket DNS layer doesn't have a lot of good String()
-   conversion methods, so we have to do a lot of that ourselves
-   here.  Much of this should move back into gopacket.  Also a
-   little worried about the perf impact of doing string conversions
-   in this thread...
-*/
-func TypeString(dnsType layers.DNSType) string {
-	switch dnsType {
-	default:
-		//take a blind stab...at least this shouldn't *lose* data
-		return strconv.Itoa(int(dnsType))
-	case layers.DNSTypeA:
-		return "A"
-	case layers.DNSTypeAAAA:
-		return "AAAA"
-	case layers.DNSTypeCNAME:
-		return "CNAME"
-	case layers.DNSTypeMX:
-		return "MX"
-	case layers.DNSTypeNS:
-		return "NS"
-	case layers.DNSTypePTR:
-		return "PTR"
-	case layers.DNSTypeTXT:
-		return "TXT"
-	case layers.DNSTypeSOA:
-		return "SOA"
-	case layers.DNSTypeSRV:
-		return "SRV"
-	case 255: //ANY query per http://tools.ietf.org/html/rfc1035#page-12
-		return "ANY"
-	}
-}
-
-/*
-   The gopacket DNS layer doesn't have a lot of good String()
-   conversion methods, so we have to do a lot of that ourselves
-   here.  Much of this should move back into gopacket.  Also a
-   little worried about the perf impact of doing string conversions
-   in this thread...
-*/
-func RrString(rr layers.DNSResourceRecord) string {
-	switch rr.Type {
-	default:
-		//take a blind stab...at least this shouldn't *lose* data
-		return string(rr.Data)
-	case layers.DNSTypeA:
-		return rr.IP.String()
-	case layers.DNSTypeAAAA:
-		return rr.IP.String()
-	case layers.DNSTypeCNAME:
-		return string(rr.CNAME)
-	case layers.DNSTypeMX:
-		//TODO: add the priority
-		return string(rr.MX.Name)
-	case layers.DNSTypeNS:
-		return string(rr.NS)
-	case layers.DNSTypePTR:
-		return string(rr.PTR)
-	case layers.DNSTypeTXT:
-		return string(rr.TXT)
-	case layers.DNSTypeSOA:
-		//TODO: rebuild the full SOA string
-		return string(rr.SOA.RName)
-	case layers.DNSTypeSRV:
-		//TODO: rebuild the full SRV string
-		return string(rr.SRV.Name)
-	}
-}
 
 /*
 	takes the src IP, dst IP, DNS question, DNS reply and the logs struct to populate.
@@ -447,76 +339,6 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 	}
 }
 
-//Spin up required logging threads and then round-robin log messages to log sinks
-func logConn(logC chan dnsLogEntry, quiet bool,
-	filename string, kafkaBrokers string, kafkaTopic string) {
-
-	//holds the channels for the outgoing log channels
-	var logs []chan dnsLogEntry
-
-	if !quiet {
-		log.Debug("STDOUT logging enabled")
-		stdoutChan := make(chan dnsLogEntry)
-		logs = append(logs, stdoutChan)
-		go logConnStdout(stdoutChan)
-	}
-
-	if filename != "" {
-		log.Debug("file logging enabled to " + filename)
-		fileChan := make(chan dnsLogEntry)
-		logs = append(logs, fileChan)
-		go logConnFile(fileChan, filename)
-	}
-
-	if kafkaBrokers != "" && kafkaTopic != "" && false {
-		log.Debug("kafka logging enabled")
-		kafkaChan := make(chan dnsLogEntry)
-		logs = append(logs, kafkaChan)
-		go logConnKafka(kafkaChan, kafkaBrokers, kafkaTopic)
-	}
-
-	//setup is done, now we sit here and dispatch messages to the configured sinks
-	for message := range logC {
-		for _, logChan := range logs {
-			logChan <- message
-		}
-	}
-}
-
-//logs to stdout
-func logConnStdout(logC chan dnsLogEntry) {
-	for message := range logC {
-		encoded, _ := message.Encode()
-		fmt.Println(string(encoded))
-	}
-}
-
-//logs to a file
-func logConnFile(logC chan dnsLogEntry, filename string) {
-
-	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Debug("could not open logfile "+filename+" for writing!")
-		panic(err)
-	}
-
-	defer f.Close()
-
-	enc := ffjson.NewEncoder(bufio.NewWriter(f))
-
-	for message := range logC {
-		enc.Encode(message)
-	}
-}
-
-//logs to kafka
-func logConnKafka(logC chan dnsLogEntry, kafkaBrokers string, kafkaTopic string) {
-	for message := range logC {
-		encoded, _ := message.Encode()
-		fmt.Println("Kafka: " + string(encoded))
-	}
-}
-
 //setup a device or pcap file for capture, returns a handle
 func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle {
 
@@ -559,16 +381,6 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 */
 
 	return handle
-}
-
-func foundLayerType(layer gopacket.LayerType, found []gopacket.LayerType) bool{
-	for _, value := range found {
-		if value == layer {
-			return true
-		}
-	}
-	
-	return false
 }
 
 //kick off packet procesing threads and start the packet capture loop
@@ -698,22 +510,6 @@ func gracefulShutdown(channels []chan packetData, reChan chan tcpDataStruct, log
 	}
 }
 	
-
-//setup logging settings
-func initLogging(debug bool) chan dnsLogEntry {
-	if debug {
-		log.SetLevel(log.DebugLevel)
-	}
-
-	//TODO: further logging setup?
-
-	/* spin up logging channel */
-	var logChan = make(chan dnsLogEntry, 100)
-
-	return logChan
-
-}
-
 func main() {
 
 	var dev = flag.String("dev", "", "Capture Device")
