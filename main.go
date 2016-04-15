@@ -262,9 +262,6 @@ func (d *dnsStream) run() {
 	var data []byte
 	var tmp = make([]byte, 4096)
 	
-	
-	//_="breakpoint"
-	//buf := bufio.NewReader(&d.r)
 	for {
 		count, err := d.r.Read(tmp)
 		
@@ -283,8 +280,6 @@ func (d *dnsStream) run() {
 			
 			data = append(data, tmp...)
 		
-		}else{
-		//	_="breakpoint"
 		}
 	}
 }
@@ -516,8 +511,8 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 			log.Debug(err)
 			return nil
 		}
-	} else if dev != "" && pfring {
-/*		handle, err = pfring.NewRing(dev, 65536, true, pfring.FlagPromisc)
+/*	} else if dev != "" && pfring {
+		handle, err = pfring.NewRing(dev, 65536, true, pfring.FlagPromisc)
 		if err != nil {
 			log.Debug(err)
 			return nil

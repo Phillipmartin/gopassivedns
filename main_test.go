@@ -474,6 +474,74 @@ func TestParseMX(t *testing.T){
     }      
 }
 
+func TestParseNXDOMAIN(t *testing.T){
+    gcAge, _ := time.ParseDuration("-1m")
+	gcInterval, _ := time.ParseDuration("3m")
+    
+    var packetChan = make(chan packetData)
+    var logChan = make(chan dnsLogEntry)
+
+    go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+    
+    packetSource := getPacketData("nxdomain")
+	packetSource.DecodeOptions.Lazy = true
+	for packet := range packetSource.Packets() {
+	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	}
+
+    logs := ToSlice(logChan)
+    
+    if len(logs) > 1{
+        t.Fatalf("Expecting a single log, got %d", len(logs))
+    }
+    
+    log := logs[0]
+    
+
+    //validate values of log struct
+    if log.Query_ID != 0xb369 {
+        t.Fatalf("Bad Query ID %d, expecting %d\n",log.Query_ID,0xb369)
+    }
+    
+    if log.Response_Code != 3 {
+        t.Fatalf("Bad Response code %d, expecting 3\n", log.Response_Code)
+    }
+    
+    if log.Question != "asdtartfgeasf.asdfgsdf.com"  {
+        t.Fatalf("Bad question %s, expecting asdtartfgeasf.asdfgsdf.com\n", log.Question)
+    }
+    
+    if log.Question_Type != "A"  {
+        t.Fatalf("Bad question type %s, expecting A\n", log.Question_Type)
+    }
+    
+    if log.Answer != "Non-Existent Domain"  {
+        t.Fatalf("Bad answer %s, expecting Non-Existent Domain\n", log.Answer)
+    }
+    
+    if log.Answer_Type != ""  {
+        t.Fatalf("Bad answer type %s, expecting an empty string\n", log.Answer_Type)
+    }
+    
+    if log.TTL != 0  {
+        t.Fatalf("Bad TTL %d, expecting 0", log.TTL)
+    }
+    
+/*        if log.Server !=  {
+        t.Fatal("")
+    }
+    
+    if log.Client !=  {
+        t.Fatal("")
+    }*/
+    
+    //parse the JSON and make sure it works
+    log.Encode()
+    if log.encoded == nil || log.err != nil {
+        t.Fatal("log marshaling error!")
+    }
+}
+
 func TestParseMultipleUDPPackets(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
