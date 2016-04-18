@@ -286,10 +286,10 @@ func handlePacket(packets chan packetData, logC chan dnsLogEntry,
 
 	for{
 		select{
-			case packet := <- packets:
+			case packet, more := <- packets:
 		
 				//used for clean shutdowns
-				if packet.Type == "stop" {
+				if !more {
 					return
 				}else if packet.Type == "flush" {
 					count:=assembler.FlushAll()
@@ -495,11 +495,12 @@ func gracefulShutdown(channels []chan packetData, reChan chan tcpDataStruct, log
 	
 	log.Debug("Stopping packet processing...")
 	for i := 0; i < numprocs; i++ {
-		channels[i] <- packetData{Type:"stop"}
+		close(channels[i])
 	}
 	
 	log.Debug("waiting for log pipeline to flush...")
-
+	close(logChan)
+	
 	for len(logChan) > 0 {
 		wait_time--
 		if wait_time == 0{
@@ -543,12 +544,14 @@ func main() {
 		log.Fatal("Could not initilize the capture.")
 	}
 
-	logChan := initLogging(*debug)
+	logOpts := NewLogOptions(*quiet, *debug, *logFile, *kafkaBrokers, *kafkaTopic)
+
+	logChan := initLogging(logOpts)
 
 	reChan := make(chan tcpDataStruct)
 
 	//spin up logging thread(s)
-	go logConn(logChan, *quiet, *logFile, *kafkaBrokers, *kafkaTopic)
+	go logConn(logChan, logOpts)
 
 	//spin up the actual capture threads
 	doCapture(handle, logChan, *gcAge, *gcInterval, *numprocs, reChan)

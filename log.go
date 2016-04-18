@@ -8,6 +8,45 @@ import "github.com/pquerna/ffjson/ffjson"
 import log "github.com/Sirupsen/logrus"
 
 
+type logOptions struct {
+    quiet           bool
+    debug           bool
+    Filename        string
+    KafkaBrokers    string
+    KafkaTopic      string
+    closed          bool
+    control         chan string
+}
+
+func NewLogOptions(quiet bool, debug bool, filename string, kafkaBrokers string, kafkaTopic string) *logOptions {
+    return &logOptions{
+        quiet:          quiet,
+        debug:          debug,
+        Filename:       filename,
+        KafkaBrokers:   kafkaBrokers,
+        KafkaTopic:     kafkaTopic,
+    }
+}
+
+func (lo *logOptions) IsDebug() bool {
+    return lo.debug
+}
+
+func (lo *logOptions) LogToStdout() bool {
+    return !lo.quiet
+}
+
+func (lo *logOptions) LogToFile() bool {
+    return !(lo.Filename == "")
+}
+
+func (lo *logOptions) LogToKafka() bool {
+    return !(lo.KafkaBrokers == "" && lo.KafkaTopic == "")
+}
+
+
+
+
 type dnsLogEntry struct {
 	Query_ID      uint16 `json:"query_id"`
 	Response_Code int    `json:"response_code"`
@@ -43,8 +82,8 @@ func (dle *dnsLogEntry) Encode() ([]byte, error) {
 	return dle.encoded, dle.err
 }
 
-func initLogging(debug bool) chan dnsLogEntry {
-	if debug {
+func initLogging(opts *logOptions) chan dnsLogEntry {
+	if opts.IsDebug() {
 		log.SetLevel(log.DebugLevel)
 	}
 
@@ -58,31 +97,30 @@ func initLogging(debug bool) chan dnsLogEntry {
 }
 
 //Spin up required logging threads and then round-robin log messages to log sinks
-func logConn(logC chan dnsLogEntry, quiet bool,
-	filename string, kafkaBrokers string, kafkaTopic string) {
+func logConn(logC chan dnsLogEntry, opts *logOptions) {
 
 	//holds the channels for the outgoing log channels
 	var logs []chan dnsLogEntry
 
-	if !quiet {
+	if opts.LogToStdout() {
 		log.Debug("STDOUT logging enabled")
 		stdoutChan := make(chan dnsLogEntry)
 		logs = append(logs, stdoutChan)
 		go logConnStdout(stdoutChan)
 	}
 
-	if filename != "" {
-		log.Debug("file logging enabled to " + filename)
+	if opts.LogToFile() {
+		log.Debug("file logging enabled to " + opts.Filename)
 		fileChan := make(chan dnsLogEntry)
 		logs = append(logs, fileChan)
-		go logConnFile(fileChan, filename)
+		go logConnFile(fileChan, opts)
 	}
 
-	if kafkaBrokers != "" && kafkaTopic != "" && false {
+	if opts.LogToKafka() {
 		log.Debug("kafka logging enabled")
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
-		go logConnKafka(kafkaChan, kafkaBrokers, kafkaTopic)
+		go logConnKafka(kafkaChan, opts)
 	}
 
 	//setup is done, now we sit here and dispatch messages to the configured sinks
@@ -91,6 +129,13 @@ func logConn(logC chan dnsLogEntry, quiet bool,
 			logChan <- message
 		}
 	}
+
+	//if the range exits, the channel was closed, so close the other channels
+	for _, logChan := range logs {
+		close(logChan)
+	}	
+
+	return
 }
 
 //logs to stdout
@@ -102,10 +147,10 @@ func logConnStdout(logC chan dnsLogEntry) {
 }
 
 //logs to a file
-func logConnFile(logC chan dnsLogEntry, filename string) {
+func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 
 	logger := &lumberjack.Logger{
-	    Filename:   filename,
+	    Filename:   opts.Filename,
 	    MaxSize:    1, // megabytes
 	    MaxBackups: 3,
 	    MaxAge:     28, //days
@@ -116,13 +161,17 @@ func logConnFile(logC chan dnsLogEntry, filename string) {
 	for message := range logC {
 		enc.Encode(message)
 	}
+	
+	logger.Close()
+
 }
 
 //logs to kafka
-func logConnKafka(logC chan dnsLogEntry, kafkaBrokers string, kafkaTopic string) {
+func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
 	for message := range logC {
 		encoded, _ := message.Encode()
 		fmt.Println("Kafka: " + string(encoded))
+		
 	}
 }
 

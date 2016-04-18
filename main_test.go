@@ -65,6 +65,17 @@ func ToSlice(c chan dnsLogEntry) []dnsLogEntry {
     }    
 }
 
+func LogMirrorBg(source chan dnsLogEntry, target chan dnsLogEntry)  {
+    for{
+        select{
+            case i := <- source:
+                target <- i
+            case <-time.After(time.Second):
+                return
+        }
+    }    
+}
+
 /*
 Benchmarking functions
 
@@ -608,10 +619,13 @@ func TestDoCaptureUDP(t *testing.T){
     handle := getHandle("100_udp_lookups")
     var logChan = make(chan dnsLogEntry, 100)
     var reChan = make(chan tcpDataStruct)
+    var logStash = make(chan dnsLogEntry, 100)
+    
+    go LogMirrorBg(logChan, logStash)
     
     doCapture(handle, logChan, "-1m", "3m", 8, reChan)
     
-    logs := ToSlice(logChan)
+    logs := ToSlice(logStash)
     
     if len(logs) != 50 {
         t.Fatalf("Expecting 50 logs, got %d", len(logs))
@@ -624,10 +638,13 @@ func TestDoCaptureTCP(t *testing.T){
     handle := getHandle("100_tcp_lookups")
     var logChan = make(chan dnsLogEntry, 400)
     var reChan = make(chan tcpDataStruct, 1000)
+    var logStash = make(chan dnsLogEntry, 400)
+
+    go LogMirrorBg(logChan, logStash)
     
     doCapture(handle, logChan, "-1m", "3m", 8, reChan)
     
-    logs := ToSlice(logChan)
+    logs := ToSlice(logStash)
     
     if len(logs) != 300 {
         t.Fatalf("Expecting 300 logs, got %d", len(logs))
