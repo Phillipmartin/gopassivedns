@@ -167,7 +167,6 @@ func BenchmarkHandleUDPPackets(b *testing.B){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan packetData, 101)
     var logChan = make(chan dnsLogEntry)
 
 	go func (){for{<- logChan}}()
@@ -176,12 +175,13 @@ func BenchmarkHandleUDPPackets(b *testing.B){
     for i := 0; i < b.N; i++ {
         b.StopTimer()
         //print(".")
+        var packetChan = make(chan *packetData, 101)
         packetSource := getPacketData("100_udp_lookups")
 	    packetSource.DecodeOptions.Lazy = true
 	    for packet := range packetSource.Packets() {
-	        packetChan <- packetData{Packet: packet, Type: "packet"}
+	        packetChan <- NewPacketData(packet)
 	    }
-	    packetChan <- packetData{Type: "stop"}
+	    close(packetChan)
 	    
 	    //print(".")
 	    b.StartTimer()
@@ -199,7 +199,7 @@ func TestParseA(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan packetData)
+    var packetChan = make(chan *packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -207,7 +207,7 @@ func TestParseA(t *testing.T){
     packetSource := getPacketData("a")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	}
 
     select {
@@ -273,7 +273,7 @@ func TestParseAAAA(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan packetData)
+    var packetChan = make(chan *packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -281,7 +281,7 @@ func TestParseAAAA(t *testing.T){
     packetSource := getPacketData("aaaa")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	}
 
     select {
@@ -346,7 +346,7 @@ func TestParseNS(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan packetData)
+    var packetChan = make(chan *packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -354,7 +354,7 @@ func TestParseNS(t *testing.T){
     packetSource := getPacketData("ns")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	}
 
     select {
@@ -418,7 +418,7 @@ func TestParseMX(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan packetData)
+    var packetChan = make(chan *packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -426,7 +426,7 @@ func TestParseMX(t *testing.T){
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	}
 
     select {
@@ -489,7 +489,7 @@ func TestParseNXDOMAIN(t *testing.T){
     gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
     
-    var packetChan = make(chan packetData)
+    var packetChan = make(chan *packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -497,7 +497,7 @@ func TestParseNXDOMAIN(t *testing.T){
     packetSource := getPacketData("nxdomain")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	}
 
     logs := ToSlice(logChan)
@@ -559,7 +559,7 @@ func TestParseMultipleUDPPackets(t *testing.T){
     
      //if I don't specify 6 here, this test stalls putting packets into the channel.
      //so strange.
-    var packetChan = make(chan packetData, 6)
+    var packetChan = make(chan *packetData, 6)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -567,7 +567,7 @@ func TestParseMultipleUDPPackets(t *testing.T){
     packetSource := getPacketData("multiple_udp")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	}
 	
 	logs := ToSlice(logChan)
@@ -692,7 +692,7 @@ func TestConntableGC(t *testing.T){
     gcAge, _ := time.ParseDuration("-5s")
 	gcInterval, _ := time.ParseDuration("5s")
     
-    var packetChan = make(chan packetData)
+    var packetChan = make(chan *packetData)
     var logChan = make(chan dnsLogEntry)
 
     go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
@@ -700,7 +700,7 @@ func TestConntableGC(t *testing.T){
     packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
 	for packet := range packetSource.Packets() {
-	    packetChan <- packetData{Packet: packet, Type: "packet"}
+	    packetChan <- NewPacketData(packet)
 	    time.Sleep(time.Duration(11)*time.Second)
 	}
 	
