@@ -11,6 +11,7 @@ import "github.com/google/gopacket/layers"
   Type will be tcp or packet for those type
   or it can be 'flush' or 'stop' to signal packet handling threads
 */
+// codebeat:disable[TOO_MANY_IVARS]
 type packetData struct {
 	packet   gopacket.Packet
 	tcpdata  tcpDataStruct
@@ -25,6 +26,7 @@ type packetData struct {
 	dns      *layers.DNS
 	payload  *gopacket.Payload
 }
+// codebeat:enable[TOO_MANY_IVARS]
 
 func NewTcpData(tcpdata tcpDataStruct) *packetData {
 	var pd packetData
