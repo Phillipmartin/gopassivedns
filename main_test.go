@@ -194,7 +194,7 @@ func BenchmarkHandleUDPPackets(b *testing.B) {
 
 		//print(".")
 		b.StartTimer()
-		handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+		handlePacket(packetChan, logChan, gcInterval, gcAge, 1, stats)
 	}
 
 }

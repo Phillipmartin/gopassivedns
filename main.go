@@ -487,10 +487,10 @@ func main() {
 	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 	var numprocs = flag.Int("numprocs", 8, "number of packet processing threads")
 	var pfring = flag.Bool("pfring", false, "Capture using PF_RING")
-
+	var sensorName = flag.String("name", "", "sensor name used in logging and stats reporting")
 	var statsdHost = flag.String("statsd_host", "", "Statsd server hostname or IP")
 	var statsdInterval = flag.Int("statsd_interval", 3, "Seconds between metric flush")
-	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns.", "statsd metric prefix")
+	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns", "statsd metric prefix")
 
 	flag.Parse()
 
@@ -506,7 +506,15 @@ func main() {
 	var stats *statsd.StatsdBuffer = nil
 
 	if *statsdHost != "" {
-		statsdclient := statsd.NewStatsdClient(*statsdHost, *statsdPrefix)
+		if *sensorName == "" {
+			hostname,err := os.Hostname()
+			if err != nil {
+				*sensorName = "UNKNOWN"	
+			}else{
+				sensorName = &hostname
+			}
+		}
+		statsdclient := statsd.NewStatsdClient(*statsdHost, *statsdPrefix+"."+*sensorName+".")
 		stats = statsd.NewStatsdBuffer(time.Duration(*statsdInterval)*time.Second, statsdclient)
 	}
 
