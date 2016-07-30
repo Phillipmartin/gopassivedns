@@ -282,6 +282,9 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 				continue
 			} else if packet.HasDNSLayer() {
 				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP)
+				if stats != nil {
+					stats.Incr(strconv.Itoa(threadNum)+".dns_lookups", 1)
+				}
 			} else {
 				//UDP and doesn't parse as DNS?
 				log.Debug("Missing a DNS layer?")
