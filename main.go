@@ -490,7 +490,7 @@ func main() {
 
 	var statsdHost = flag.String("statsd_host", "", "Statsd server hostname or IP")
 	var statsdInterval = flag.Int("statsd_interval", 3, "Seconds between metric flush")
-	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns", "statsd metric prefix")
+	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns.", "statsd metric prefix")
 
 	flag.Parse()
 

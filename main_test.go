@@ -4,9 +4,14 @@ import "testing"
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/layers"
+import "github.com/quipo/statsd"
 import "os/user"
+import "os"
 import "time"
 import "net"
+import "flag"
+
+var stats *statsd.StatsdBuffer = nil
 
 /*
 Utility functions
@@ -621,7 +626,7 @@ func TestDoCaptureUDP(t *testing.T) {
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, "-1m", "3m", 8, reChan, nil)
+	doCapture(handle, logChan, "-1m", "3m", 8, reChan, stats)
 
 	logs := ToSlice(logStash)
 
@@ -640,7 +645,7 @@ func TestDoCaptureTCP(t *testing.T) {
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, "-1m", "3m", 8, reChan, nil)
+	doCapture(handle, logChan, "-1m", "3m", 8, reChan, stats)
 
 	logs := ToSlice(logStash)
 
@@ -693,7 +698,7 @@ func TestConntableGC(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, stats)
 
 	packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
@@ -791,3 +796,18 @@ func TestInitLogging(t *testing.T){
 
 }
 */
+
+func TestMain(m *testing.M){
+	var statsdHost = flag.String("statsd_host", "", "Statsd server hostname or IP")
+	var statsdInterval = flag.Int("statsd_interval", 3, "Seconds between metric flush")
+	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns", "statsd metric prefix")
+	
+	flag.Parse()
+	
+	if *statsdHost != "" {
+		statsdclient := statsd.NewStatsdClient(*statsdHost, *statsdPrefix)
+		stats = statsd.NewStatsdBuffer(time.Duration(*statsdInterval)*time.Second, statsdclient)
+	}
+	
+	os.Exit(m.Run())
+}
