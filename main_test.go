@@ -189,7 +189,7 @@ func BenchmarkHandleUDPPackets(b *testing.B) {
 
 		//print(".")
 		b.StartTimer()
-		handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+		handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 	}
 
 }
@@ -206,7 +206,7 @@ func TestParseA(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("a")
 	packetSource.DecodeOptions.Lazy = true
@@ -278,7 +278,7 @@ func TestParseAAAA(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("aaaa")
 	packetSource.DecodeOptions.Lazy = true
@@ -350,7 +350,7 @@ func TestParseNS(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("ns")
 	packetSource.DecodeOptions.Lazy = true
@@ -421,7 +421,7 @@ func TestParseMX(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
@@ -492,7 +492,7 @@ func TestParseNXDOMAIN(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("nxdomain")
 	packetSource.DecodeOptions.Lazy = true
@@ -561,7 +561,7 @@ func TestParseMultipleUDPPackets(t *testing.T) {
 	var packetChan = make(chan *packetData, 6)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("multiple_udp")
 	packetSource.DecodeOptions.Lazy = true
@@ -693,7 +693,7 @@ func TestConntableGC(t *testing.T) {
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1)
+	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true

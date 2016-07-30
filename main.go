@@ -158,17 +158,24 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 //background task to clear out stale entries in the conntable
 //one of these gets spun up for every packet handling thread
 //takes a pointer to the contable to clean, the maximum age of an entry and how often to run GC
-func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, interval time.Duration, threadNum int) {
+func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, 
+	interval time.Duration, threadNum int, stats *statsd.StatsdBuffer) {
 
 	for {
 		time.Sleep(interval)
 
 		//max_age should be negative, e.g. -1m
 		cleanupCutoff := time.Now().Add(maxAge)
+		if stats != nil {
+			stats.Gauge(strconv.Itoa(threadNum)+".cache_size", int64(len(*conntable)))
+		}
 		for key, item := range *conntable {
 			if item.inserted.Before(cleanupCutoff) {
 				log.Debug("conntable GC(" + strconv.Itoa(threadNum) + "): cleanup query ID " + strconv.Itoa(int(key)))
 				delete(*conntable, key)
+				if stats != nil {
+					stats.Incr(strconv.Itoa(threadNum)+".cache_entries_dropped", 1)
+				}
 			}
 		}
 	}
@@ -229,13 +236,14 @@ func handleDns(conntable *map[uint16]dnsMapEntry, dns *layers.DNS, logC chan dns
    we pass packet by value here because we turned on ZeroCopy for the capture, which reuses the capture buffer
 */
 func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
-	gcInterval time.Duration, gcAge time.Duration, threadNum int) {
+	gcInterval time.Duration, gcAge time.Duration, threadNum int, 
+	stats *statsd.StatsdBuffer) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
 	var conntable = make(map[uint16]dnsMapEntry)
 
 	//setup garbage collection for this map
-	go cleanDnsCache(&conntable, gcAge, gcInterval, threadNum)
+	go cleanDnsCache(&conntable, gcAge, gcInterval, threadNum, stats)
 
 	//TCP reassembly init
 	streamFactory := &dnsStreamFactory{}
@@ -356,7 +364,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	}
 
 	for i := 0; i < numprocs; i++ {
-		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur, i)
+		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur, i, stats)
 	}
 
 	// Use the handle as a packet source to process all packets
