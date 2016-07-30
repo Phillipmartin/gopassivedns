@@ -46,6 +46,7 @@ func (lo *logOptions) LogToKafka() bool {
 	return !(lo.KafkaBrokers == "" && lo.KafkaTopic == "")
 }
 
+// codebeat:disable[TOO_MANY_IVARS]
 type dnsLogEntry struct {
 	Query_ID      uint16 `json:"query_id"`
 	Response_Code int    `json:"response_code"`
@@ -61,6 +62,7 @@ type dnsLogEntry struct {
 	encoded []byte //to hold the marshaled data structure
 	err     error  //encoding errors
 }
+// codebeat:enable[TOO_MANY_IVARS]
 
 //private, idempotent function that ensures the json is encoded
 func (dle *dnsLogEntry) ensureEncoded() {
