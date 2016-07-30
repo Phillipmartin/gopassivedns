@@ -394,12 +394,18 @@ CAPTURE:
 		case reassembledTcp := <-reChan:
 			pd := NewTcpData(reassembledTcp)
 			channels[int(reassembledTcp.IpLayer.FastHash())&(numprocs-1)] <- pd
+			if stats != nil {
+				stats.Incr("reassembed_tcp", 1)
+			}
 		case packet := <-packetSource.Packets():
 			if packet != nil {
 				parser.DecodeLayers(packet.Data(), &foundLayerTypes)
 				if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
 					pd := NewPacketData(packet)
 					channels[int(ipLayer.NetworkFlow().FastHash())&(numprocs-1)] <- pd
+					if stats != nil {
+						stats.Incr("packets", 1)
+					}
 				}
 			} else {
 				//if we get here, we're likely reading a pcap and we've finished
