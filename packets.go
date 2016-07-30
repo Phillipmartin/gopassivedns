@@ -12,96 +12,93 @@ import "github.com/google/gopacket/layers"
   or it can be 'flush' or 'stop' to signal packet handling threads
 */
 type packetData struct {
-	packet gopacket.Packet
-	tcpdata tcpDataStruct
+	packet   gopacket.Packet
+	tcpdata  tcpDataStruct
 	datatype string
-	
+
 	foundLayerTypes []gopacket.LayerType
-	
+
 	ethLayer *layers.Ethernet
-    ipLayer  *layers.IPv4
-    udpLayer *layers.UDP
-    tcpLayer *layers.TCP
-    dns *layers.DNS
-    payload *gopacket.Payload
+	ipLayer  *layers.IPv4
+	udpLayer *layers.UDP
+	tcpLayer *layers.TCP
+	dns      *layers.DNS
+	payload  *gopacket.Payload
 }
 
 func NewTcpData(tcpdata tcpDataStruct) *packetData {
 	var pd packetData
-	pd.datatype="tcp"
+	pd.datatype = "tcp"
 	pd.tcpdata = tcpdata
 	return &pd
 }
 
 func NewPacketData(packet gopacket.Packet) *packetData {
 	var pd packetData
-	pd.datatype="packet"
+	pd.datatype = "packet"
 	pd.packet = packet
 	return &pd
 }
 
 func (pd *packetData) Parse() error {
-	
+
 	if pd.datatype == "tcp" {
 		pd.dns = &layers.DNS{}
-	    pd.payload = &gopacket.Payload{}
+		pd.payload = &gopacket.Payload{}
 		//for parsing the reassembled TCP streams
 		dnsParser := gopacket.NewDecodingLayerParser(
-	            layers.LayerTypeDNS,
-	            pd.dns,
-	            pd.payload,
-	        )
-	        
-	    dnsParser.DecodeLayers(pd.tcpdata.DnsData, &pd.foundLayerTypes)
-	    
-	    return nil
-	}else if pd.datatype == "packet" {
+			layers.LayerTypeDNS,
+			pd.dns,
+			pd.payload,
+		)
+
+		dnsParser.DecodeLayers(pd.tcpdata.DnsData, &pd.foundLayerTypes)
+
+		return nil
+	} else if pd.datatype == "packet" {
 		pd.ethLayer = &layers.Ethernet{}
-    	pd.ipLayer =  &layers.IPv4{}
-    	pd.udpLayer = &layers.UDP{}
-    	pd.tcpLayer = &layers.TCP{}
-    	pd.dns = &layers.DNS{}
-	    pd.payload = &gopacket.Payload{}
+		pd.ipLayer = &layers.IPv4{}
+		pd.udpLayer = &layers.UDP{}
+		pd.tcpLayer = &layers.TCP{}
+		pd.dns = &layers.DNS{}
+		pd.payload = &gopacket.Payload{}
 		//we're constraining the set of layer decoders that gopacket will apply
 		//to this traffic. this MASSIVELY speeds up the parsing phase
 		parser := gopacket.NewDecodingLayerParser(
-	            layers.LayerTypeEthernet,
-	            pd.ethLayer,
-	            pd.ipLayer,
-	            pd.udpLayer,
-	            pd.tcpLayer,
-	            pd.dns,
-	            pd.payload,
-	        )
-		
-	        
+			layers.LayerTypeEthernet,
+			pd.ethLayer,
+			pd.ipLayer,
+			pd.udpLayer,
+			pd.tcpLayer,
+			pd.dns,
+			pd.payload,
+		)
+
 		parser.DecodeLayers(pd.packet.Data(), &pd.foundLayerTypes)
-		
+
 		return nil
-		
-	}else{
-		return errors.New("Bad packet type: "+pd.datatype)
+
+	} else {
+		return errors.New("Bad packet type: " + pd.datatype)
 	}
 }
 
-func (pd *packetData) GetSrcIP() net.IP{
+func (pd *packetData) GetSrcIP() net.IP {
 	if pd.ipLayer != nil {
-		return pd.ipLayer.SrcIP 
+		return pd.ipLayer.SrcIP
 	} else {
 		return net.IP(pd.tcpdata.IpLayer.Src().Raw())
 	}
-					
+
 }
 
-func (pd *packetData) GetDstIP() net.IP{
+func (pd *packetData) GetDstIP() net.IP {
 	if pd.ipLayer != nil {
-		return pd.ipLayer.DstIP 
+		return pd.ipLayer.DstIP
 	} else {
 		return net.IP(pd.tcpdata.IpLayer.Dst().Raw())
 	}
 }
-
-
 
 func (pd *packetData) IsTCPStream() bool {
 	return pd.datatype == "tcp"
