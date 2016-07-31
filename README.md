@@ -33,6 +33,10 @@ Resolver support for query logging, including both the question and answer is sp
    * -cpuprofile [file]         enable CPU profiling
    * -numprocs [num]            number of goroutines to use for parsing packet data (default: 8)
    * -pfring                    use PF_RING for packet capture
+   * -statsd_host               host and port of your statsd server (e.g. localhost:8125)
+   * -statsd_interval           the interval, in seconds, between sends to statsd
+   * -statsd_prefix             the metric name prefix to use (by default, gopassivedns)
+   * -name                      the name of this sensor for use in stats and log messages (defaults to hostname)
 
 You must supply either -dev or -pcap.  
 
