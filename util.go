@@ -75,12 +75,12 @@ func RrString(rr layers.DNSResourceRecord) string {
 	}
 }
 
-func foundLayerType(layer gopacket.LayerType, found []gopacket.LayerType) bool{
+func foundLayerType(layer gopacket.LayerType, found []gopacket.LayerType) bool {
 	for _, value := range found {
 		if value == layer {
 			return true
 		}
 	}
-	
+
 	return false
 }
