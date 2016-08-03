@@ -52,7 +52,7 @@ Right now, I'd recommend using logstash to ship the logs to an elasticsearch clu
 
 ##Build and install
    * clone this repo
-   * install libpcap, libpcap-dev and PF_RING
+   * install libpcap, libpcap-dev
    * 'go get'
    * 'go build -o gopassivedns'  (the -o is really just being careful, assuming you cloned the repo you shouldn't need it)
    * 'cp gopassivedns /some/path/to/gopassivedns'
