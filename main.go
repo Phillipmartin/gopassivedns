@@ -82,8 +82,20 @@ func (d *dnsStream) run() {
 		if err == io.EOF {
 			//we must read to EOF, so we also use it as a signal to send the reassembed
 			//stream into the channel
+			// Ensure the length of data is at least two for integer parsing,
+			// skip to next iterator if too short
+			if len(data) < 2 {
+				return
+			}
+			// Parse the actual integer
+			dns_data_len := int(binary.BigEndian.Uint16(data[:2]))
+			// Ensure the length of data is the parsed size +2,
+			// skip to next iterator if too short
+			if len(data) < dns_data_len+2 {
+				return
+			}
 			reassembleChan <- tcpDataStruct{
-				DnsData: data[2 : int(binary.BigEndian.Uint16(data[:2]))+2],
+				DnsData: data[2 : dns_data_len+2],
 				IpLayer: d.net,
 				Length:  int(binary.BigEndian.Uint16(data[:2])),
 			}
@@ -158,7 +170,7 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 //background task to clear out stale entries in the conntable
 //one of these gets spun up for every packet handling thread
 //takes a pointer to the contable to clean, the maximum age of an entry and how often to run GC
-func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration, 
+func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration,
 	interval time.Duration, threadNum int, stats *statsd.StatsdBuffer) {
 
 	for {
@@ -236,7 +248,7 @@ func handleDns(conntable *map[uint16]dnsMapEntry, dns *layers.DNS, logC chan dns
    we pass packet by value here because we turned on ZeroCopy for the capture, which reuses the capture buffer
 */
 func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
-	gcInterval time.Duration, gcAge time.Duration, threadNum int, 
+	gcInterval time.Duration, gcAge time.Duration, threadNum int,
 	stats *statsd.StatsdBuffer) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
@@ -507,10 +519,10 @@ func main() {
 
 	if *statsdHost != "" {
 		if *sensorName == "" {
-			hostname,err := os.Hostname()
+			hostname, err := os.Hostname()
 			if err != nil {
-				*sensorName = "UNKNOWN"	
-			}else{
+				*sensorName = "UNKNOWN"
+			} else {
 				sensorName = &hostname
 			}
 		}
