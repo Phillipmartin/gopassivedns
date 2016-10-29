@@ -20,13 +20,13 @@ type logOptions struct {
 	control      chan string
 }
 
-func NewLogOptions(quiet bool, debug bool, filename string, kafkaBrokers string, kafkaTopic string) *logOptions {
+func NewLogOptions(config *pdnsConfig) *logOptions {
 	return &logOptions{
-		quiet:        quiet,
-		debug:        debug,
-		Filename:     filename,
-		KafkaBrokers: kafkaBrokers,
-		KafkaTopic:   kafkaTopic,
+		quiet:        config.quiet,
+		debug:        config.debug,
+		Filename:     config.logFile,
+		KafkaBrokers: config.kafkaBrokers,
+		KafkaTopic:   config.kafkaTopic,
 	}
 }
 

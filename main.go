@@ -1,6 +1,5 @@
 package main
 
-import "flag"
 import log "github.com/Sirupsen/logrus"
 import "strconv"
 import "time"
@@ -18,6 +17,8 @@ import "github.com/google/gopacket/tcpassembly/tcpreader"
 //import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
 import "github.com/quipo/statsd"
+
+import _ "github.com/joho/godotenv/autoload"
 
 /*
 
@@ -309,13 +310,13 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 }
 
 //setup a device or pcap file for capture, returns a handle
-func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle {
+func initHandle(config *pdnsConfig) *pcap.Handle {
 
 	var handle *pcap.Handle
 	var err error
 
-	if dev != "" && !pfring {
-		handle, err = pcap.OpenLive(dev, 65536, true, pcap.BlockForever)
+	if config.device != "" && !config.pfring {
+		handle, err = pcap.OpenLive(config.device, 65536, true, pcap.BlockForever)
 		if err != nil {
 			log.Debug(err)
 			return nil
@@ -327,8 +328,8 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 				return nil
 			}
 		*/
-	} else if pcapFile != "" {
-		handle, err = pcap.OpenOffline(pcapFile)
+	} else if config.pcapFile != "" {
+		handle, err = pcap.OpenOffline(config.pcapFile)
 		if err != nil {
 			log.Debug(err)
 			return nil
@@ -338,7 +339,7 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 		return nil
 	}
 
-	err = handle.SetBPFFilter(bpf)
+	err = handle.SetBPFFilter(config.bpf)
 	if err != nil {
 		log.Debug(err)
 		return nil
@@ -354,16 +355,16 @@ func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Hand
 
 //kick off packet procesing threads and start the packet capture loop
 func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
-	gcAge string, gcInterval string, numprocs int, reChan chan tcpDataStruct,
+	config *pdnsConfig, reChan chan tcpDataStruct,
 	stats *statsd.StatsdBuffer) {
 
-	gcAgeDur, err := time.ParseDuration(gcAge)
+	gcAgeDur, err := time.ParseDuration(config.gcAge)
 
 	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '-1m'")
 	}
 
-	gcIntervalDur, err := time.ParseDuration(gcInterval)
+	gcIntervalDur, err := time.ParseDuration(config.gcInterval)
 
 	if err != nil {
 		log.Fatal("Your gc_age parameter was not parseable.  Use a string like '3m'")
@@ -374,11 +375,11 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
-	for i := 0; i < numprocs; i++ {
+	for i := 0; i < config.numprocs; i++ {
 		channels = append(channels, make(chan *packetData, 100))
 	}
 
-	for i := 0; i < numprocs; i++ {
+	for i := 0; i < config.numprocs; i++ {
 		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur, i, stats)
 	}
 
@@ -416,7 +417,7 @@ CAPTURE:
 		select {
 		case reassembledTcp := <-reChan:
 			pd := NewTcpData(reassembledTcp)
-			channels[int(reassembledTcp.IpLayer.FastHash())&(numprocs-1)] <- pd
+			channels[int(reassembledTcp.IpLayer.FastHash())&(config.numprocs-1)] <- pd
 			if stats != nil {
 				stats.Incr("reassembed_tcp", 1)
 			}
@@ -425,7 +426,7 @@ CAPTURE:
 				parser.DecodeLayers(packet.Data(), &foundLayerTypes)
 				if foundLayerType(layers.LayerTypeIPv4, foundLayerTypes) {
 					pd := NewPacketData(packet)
-					channels[int(ipLayer.NetworkFlow().FastHash())&(numprocs-1)] <- pd
+					channels[int(ipLayer.NetworkFlow().FastHash())&(config.numprocs-1)] <- pd
 					if stats != nil {
 						stats.Incr("packets", 1)
 					}
@@ -484,30 +485,18 @@ OUTER:
 	}
 }
 
+
+
+
 func main() {
 
-	var dev = flag.String("dev", "", "Capture Device")
-	var kafkaBrokers = flag.String("kafka_brokers", os.Getenv("KAFKA_PEERS"), "The Kafka brokers to connect to, as a comma separated list")
-	var kafkaTopic = flag.String("kafka_topic", "", "Kafka topic for output")
-	var bpf = flag.String("bpf", "port 53", "BPF Filter")
-	var pcapFile = flag.String("pcap", "", "pcap file")
-	var logFile = flag.String("logfile", "", "log file (recommended for debug only")
-	var quiet = flag.Bool("quiet", false, "do not log to stdout")
-	var gcAge = flag.String("gc_age", "-1m", "How old a connection table entry should be before it is garbage collected.")
-	var gcInterval = flag.String("gc_interval", "3m", "How often to run garbage collection.")
-	var debug = flag.Bool("debug", false, "Enable debug logging")
-	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-	var numprocs = flag.Int("numprocs", 8, "number of packet processing threads")
-	var pfring = flag.Bool("pfring", false, "Capture using PF_RING")
-	var sensorName = flag.String("name", "", "sensor name used in logging and stats reporting")
-	var statsdHost = flag.String("statsd_host", "", "Statsd server hostname or IP")
-	var statsdInterval = flag.Int("statsd_interval", 3, "Seconds between metric flush")
-	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns", "statsd metric prefix")
+	//insert the ENV as defaults here, then after the parse we add the true defaults if nothing has been set
+	//also convert true/false strings to true/false types
+	
+	config := initConfig()
 
-	flag.Parse()
-
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
+	if config.cpuprofile != "" {
+		f, err := os.Create(config.cpuprofile)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -517,26 +506,18 @@ func main() {
 
 	var stats *statsd.StatsdBuffer = nil
 
-	if *statsdHost != "" {
-		if *sensorName == "" {
-			hostname, err := os.Hostname()
-			if err != nil {
-				*sensorName = "UNKNOWN"
-			} else {
-				sensorName = &hostname
-			}
-		}
-		statsdclient := statsd.NewStatsdClient(*statsdHost, *statsdPrefix+"."+*sensorName+".")
-		stats = statsd.NewStatsdBuffer(time.Duration(*statsdInterval)*time.Second, statsdclient)
+	if config.statsdHost != "" {
+		statsdclient := statsd.NewStatsdClient(config.statsdHost, config.statsdPrefix+"."+config.sensorName+".")
+		stats = statsd.NewStatsdBuffer(time.Duration(config.statsdInterval)*time.Second, statsdclient)
 	}
 
-	handle := initHandle(*dev, *pcapFile, *bpf, *pfring)
+	handle := initHandle(config)
 
 	if handle == nil {
 		log.Fatal("Could not initilize the capture.")
 	}
 
-	logOpts := NewLogOptions(*quiet, *debug, *logFile, *kafkaBrokers, *kafkaTopic)
+	logOpts := NewLogOptions(config)
 
 	logChan := initLogging(logOpts)
 
@@ -546,7 +527,7 @@ func main() {
 	go logConn(logChan, logOpts, stats)
 
 	//spin up the actual capture threads
-	doCapture(handle, logChan, *gcAge, *gcInterval, *numprocs, reChan, stats)
+	doCapture(handle, logChan, config, reChan, stats)
 
 	log.Debug("Done!  Goodbye.")
 	os.Exit(0)

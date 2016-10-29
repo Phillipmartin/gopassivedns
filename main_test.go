@@ -626,7 +626,7 @@ func TestDoCaptureUDP(t *testing.T) {
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, "-1m", "3m", 8, reChan, stats)
+	doCapture(handle, logChan, &pdnsConfig{gcAge:"-1m", gcInterval:"3m", numprocs: 8}, reChan, stats)
 
 	logs := ToSlice(logStash)
 
@@ -645,7 +645,7 @@ func TestDoCaptureTCP(t *testing.T) {
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, "-1m", "3m", 8, reChan, stats)
+	doCapture(handle, logChan, &pdnsConfig{gcAge:"-1m", gcInterval:"3m", numprocs: 8}, reChan, stats)
 
 	logs := ToSlice(logStash)
 
@@ -741,7 +741,7 @@ func TestTCPMultiPakcet(*testing.T){
 //func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle
 
 func TestInitHandlePcap(t *testing.T) {
-	handle := initHandle("", "data/a.pcap", "port 53", false)
+	handle := initHandle(&pdnsConfig{device: "", pcapFile: "data/a.pcap", bpf: "port 53", pfring: false})
 	if handle == nil {
 		t.Fatal("Error while building handle for data/a.pcap!")
 	}
@@ -749,21 +749,21 @@ func TestInitHandlePcap(t *testing.T) {
 }
 
 func TestInitHandlePcapFail(t *testing.T) {
-	handle := initHandle("", "data/doesnotexist.pcap", "port 53", false)
+	handle := initHandle(&pdnsConfig{device: "", pcapFile: "data/doesnotexist.pcap", bpf: "port 53", pfring: false})
 	if handle != nil {
 		t.Fatal("initHandle did not error when given an invalid pcap")
 	}
 }
 
 func TestInitHandleFail(t *testing.T) {
-	handle := initHandle("", "", "port 53", false)
+	handle := initHandle(&pdnsConfig{device: "", pcapFile: "", bpf: "port 53", pfring: false})
 	if handle != nil {
 		t.Fatal("initHandle did not error out without a dev or a pcap!")
 	}
 }
 
 func TestInitHandleBadBPF(t *testing.T) {
-	handle := initHandle("", "data/a.pcap", "asdf", false)
+	handle := initHandle(&pdnsConfig{device: "", pcapFile: "data/a.pcap", bpf: "asdf", pfring: false})
 	if handle != nil {
 		t.Fatal("initHandle did not fail with an invalid BPF filter")
 	}
@@ -784,7 +784,7 @@ func TestInitHandleDev(t *testing.T) {
 	t.Log(devices)
 
 	for _, device := range devices {
-		handle := initHandle(device.Name, "", "port 53", false)
+		handle := initHandle(&pdnsConfig{device: device.Name, pcapFile: "", bpf: "port 53", pfring: false})
 		if handle == nil {
 			t.Logf("Error while building handle for %s", device.Name)
 		}
