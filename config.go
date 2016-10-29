@@ -22,6 +22,9 @@ type pdnsConfig struct {
 	kafkaBrokers string
 	kafkaTopic string
 	logFile string
+	logMaxAge int
+	logMaxSize int
+	logMaxBackups int
 	statsdHost string
 	statsdInterval int
 	statsdPrefix string
@@ -36,6 +39,9 @@ func initConfig() *pdnsConfig {
 	var bpf = flag.String("bpf", getEnvStr("PDNS_BPF", "port 53"), "BPF Filter")  //default port 53
 	var pcapFile = flag.String("pcap", getEnvStr("PDNS_PCAP_FILE", ""), "pcap file")
 	var logFile = flag.String("logfile", getEnvStr("PDNS_LOG_FILE", ""), "log file (recommended for debug only")
+	var logMaxAge = flag.Int("logMaxAge", getEnvInt("PDNS_LOG_AGE", 28), "max age of a log file before rotation, in days")  //8
+	var logMaxBackups = flag.Int("logMaxBackups", getEnvInt("PDNS_LOG_BACKUP", 3), "max number of files kept after rotation")  //8
+	var logMaxSize = flag.Int("logMaxSize", getEnvInt("PDNS_LOG_SIZE", 100), "max size of log file before rotation, in MB")  //8
 	var quiet = flag.Bool("quiet", getEnvBool("PDNS_QUIET", false), "do not log to stdout")
 	var gcAge = flag.String("gc_age", getEnvStr("PDNS_GC_AGE", "-1m"), "How old a connection table entry should be before it is garbage collected.")  //-1m
 	var gcInterval = flag.String("gc_interval", getEnvStr("PDNS_GC_INTERVAL", "3m"), "How often to run garbage collection.")  //3m
@@ -84,6 +90,9 @@ func initConfig() *pdnsConfig {
 			kafkaBrokers:	*kafkaBrokers,
 			kafkaTopic:		*kafkaTopic,
 			logFile:		*logFile,
+			logMaxAge:      *logMaxAge,
+	        logMaxSize:     *logMaxSize,
+	        logMaxBackups:  *logMaxBackups,
 			statsdHost:		*statsdHost,
 			statsdInterval:	*statsdInterval,
 			statsdPrefix:	*statsdPrefix,

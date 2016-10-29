@@ -14,6 +14,9 @@ type logOptions struct {
 	quiet        bool
 	debug        bool
 	Filename     string
+	MaxAge		 int
+	MaxBackups	 int
+	MaxSize		 int
 	KafkaBrokers string
 	KafkaTopic   string
 	closed       bool
@@ -27,6 +30,9 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		Filename:     config.logFile,
 		KafkaBrokers: config.kafkaBrokers,
 		KafkaTopic:   config.kafkaTopic,
+		MaxAge:		  config.logMaxAge,
+		MaxSize:	  config.logMaxSize,
+		MaxBackups:	  config.logMaxBackups,
 	}
 }
 
@@ -167,9 +173,9 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 
 	logger := &lumberjack.Logger{
 		Filename:   opts.Filename,
-		MaxSize:    1, // megabytes
-		MaxBackups: 3,
-		MaxAge:     28, //days
+		MaxSize:    opts.MaxSize, // megabytes
+		MaxBackups: opts.MaxBackups,
+		MaxAge:     opts.MaxAge, //days
 	}
 
 	enc := ffjson.NewEncoder(bufio.NewWriter(logger))
