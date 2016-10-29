@@ -216,12 +216,12 @@ func TestDefaultConfig(t *testing.T) {
 	//os.Setenv("PDNS_LOG_SIZE", "333")
 	//os.Setenv("PDNS_QUIET", "true")
 	//os.Setenv("PDNS_GC_AGE", "kkk")
-	//os.Setenv("PDNS_GC_INTERVAL", "lll")
-	//os.Setenv("PDNS_DEBUG", "true")
+	//os.Setenv("PDNS_GC_INTERVAL", "aaa")
+	os.Setenv("PDNS_DEBUG", "asdf")
 	os.Setenv("PDNS_PROFILE_FILE", "ggg")
-	//os.Setenv("PDNS_THREADS", "666")
+	os.Setenv("PDNS_THREADS", "aaa")
 	os.Setenv("PDNS_PFRING", "true")
-	os.Setenv("PDNS_NAME", "hhh")
+	//os.Setenv("PDNS_NAME", "hhh")
 	os.Setenv("PDNS_STATSD_HOST", "iii")
 	os.Setenv("PDNS_STATSD_INTERVAL", "777")
 	os.Setenv("PDNS_STATSD_PREFIX", "jjj")
@@ -293,10 +293,17 @@ func TestDefaultConfig(t *testing.T) {
 		t.Fatal("")
 	}
 	
-	if config.sensorName != "hhh" {
-		t.Fatal("")
+	hostname, err := os.Hostname()
+	if err != nil {
+		if config.sensorName != "UNKNOWN" {
+			t.Fatalf("%s != %s", config.sensorName, "UNKNOWN")
+		}
+	} else {
+		if config.sensorName != hostname {
+			t.Fatalf("%s != %s", config.sensorName, hostname)
+		}
 	}
-	
+
 	if config.statsdHost != "iii" {
 		t.Fatal("")
 	}
