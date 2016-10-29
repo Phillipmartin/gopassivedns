@@ -204,6 +204,134 @@ Tests
 
 */
 
+func TestDefaultConfig(t *testing.T) {
+	os.Setenv("PDNS_DEV", "aaa")
+	os.Setenv("PDNS_KAFKA_PEERS", "bbb")
+	os.Setenv("PDNS_KAFKA_TOPIC", "ccc")
+	os.Setenv("PDNS_BPF", "ddd")
+	os.Setenv("PDNS_PCAP_FILE", "eee")
+	os.Setenv("PDNS_LOG_FILE", "fff")
+	os.Setenv("PDNS_LOG_AGE", "111")
+	//os.Setenv("PDNS_LOG_BACKUP", "222")
+	//os.Setenv("PDNS_LOG_SIZE", "333")
+	//os.Setenv("PDNS_QUIET", "true")
+	//os.Setenv("PDNS_GC_AGE", "kkk")
+	//os.Setenv("PDNS_GC_INTERVAL", "lll")
+	//os.Setenv("PDNS_DEBUG", "true")
+	os.Setenv("PDNS_PROFILE_FILE", "ggg")
+	//os.Setenv("PDNS_THREADS", "666")
+	os.Setenv("PDNS_PFRING", "true")
+	os.Setenv("PDNS_NAME", "hhh")
+	os.Setenv("PDNS_STATSD_HOST", "iii")
+	os.Setenv("PDNS_STATSD_INTERVAL", "777")
+	os.Setenv("PDNS_STATSD_PREFIX", "jjj")
+	//os.Setenv("PDNS_CONFIG", "")
+
+	config := initConfig()
+	
+	if config.device != "aaa" {
+		t.Fatal("")
+	}
+	
+	if config.kafkaBrokers != "bbb" {
+		t.Fatal("")
+	}
+	
+	if config.kafkaTopic != "ccc" {
+		t.Fatal("")
+	}
+	
+	if config.bpf != "ddd" {
+		t.Fatal("")
+	}
+	
+	if config.pcapFile != "eee" {
+		t.Fatal("")
+	}
+	
+	if config.logFile != "fff" {
+		t.Fatal("")
+	}
+	
+	if config.logMaxAge != 111 {
+		t.Fatal("")
+	}
+	
+	if config.logMaxBackups != 3 {
+		t.Fatal("")
+	}
+	
+	if config.logMaxSize != 100 {
+		t.Fatal("")
+	}
+	
+	if config.quiet != false {
+		t.Fatal("")
+	}
+	
+	if config.gcAge != "-1m" {
+		t.Fatal("")
+	}
+	
+	if config.gcInterval != "3m" {
+		t.Fatal("")
+	}
+	
+	if config.debug != false {
+		t.Fatal("")
+	}
+	
+	if config.cpuprofile != "ggg" {
+		t.Fatal("")
+	}
+	
+	if config.numprocs != 8 {
+		t.Fatal("")
+	}
+	
+	if config.pfring != true {
+		t.Fatal("")
+	}
+	
+	if config.sensorName != "hhh" {
+		t.Fatal("")
+	}
+	
+	if config.statsdHost != "iii" {
+		t.Fatal("")
+	}
+	
+	if config.statsdInterval != 777 {
+		t.Fatal("")
+	}
+	
+	if config.statsdPrefix != "jjj" {
+		t.Fatal("")
+	}
+	
+	os.Unsetenv("PDNS_DEV")
+	os.Unsetenv("PDNS_KAFKA_PEERS")
+	os.Unsetenv("PDNS_KAFKA_TOPIC")
+	os.Unsetenv("PDNS_BPF")
+	os.Unsetenv("PDNS_PCAP_FILE")
+	os.Unsetenv("PDNS_LOG_FILE")
+	os.Unsetenv("PDNS_LOG_AGE")
+	os.Unsetenv("PDNS_LOG_BACKUP")
+	os.Unsetenv("PDNS_LOG_SIZE")
+	os.Unsetenv("PDNS_QUIET")
+	os.Unsetenv("PDNS_GC_AGE")
+	os.Unsetenv("PDNS_GC_INTERVAL")
+	os.Unsetenv("PDNS_DEBUG")
+	os.Unsetenv("PDNS_PROFILE_FILE")
+	os.Unsetenv("PDNS_THREADS")
+	os.Unsetenv("PDNS_PFRING")
+	os.Unsetenv("PDNS_NAME")
+	os.Unsetenv("PDNS_STATSD_HOST")
+	os.Unsetenv("PDNS_STATSD_INTERVAL")
+	os.Unsetenv("PDNS_STATSD_PREFIX")
+	
+}
+
 func TestParseA(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
@@ -798,9 +926,9 @@ func TestInitLogging(t *testing.T){
 */
 
 func TestMain(m *testing.M){
-	var statsdHost = flag.String("statsd_host", "", "Statsd server hostname or IP")
-	var statsdInterval = flag.Int("statsd_interval", 3, "Seconds between metric flush")
-	var statsdPrefix = flag.String("statsd_prefix", "gopassivedns", "statsd metric prefix")
+	var statsdHost = flag.String("test_statsd_host", "", "Statsd server hostname or IP")
+	var statsdInterval = flag.Int("test_statsd_interval", 3, "Seconds between metric flush")
+	var statsdPrefix = flag.String("test_statsd_prefix", "gopassivedns", "statsd metric prefix")
 	
 	flag.Parse()
 	
