@@ -5,6 +5,7 @@ import "strconv"
 import "flag"
 import log "github.com/Sirupsen/logrus"
 
+// codebeat:disable[TOO_MANY_IVARS]
 type pdnsConfig struct {
 	device string
 	pcapFile string
@@ -28,6 +29,8 @@ type pdnsConfig struct {
 	statsdHost string
 	statsdInterval int
 	statsdPrefix string
+	syslogFacility string
+	syslogPriority string
 }
 
 func initConfig() *pdnsConfig {
@@ -53,6 +56,8 @@ func initConfig() *pdnsConfig {
 	var statsdHost = flag.String("statsd_host", getEnvStr("PDNS_STATSD_HOST", ""), "Statsd server hostname or IP")
 	var statsdInterval = flag.Int("statsd_interval", getEnvInt("PDNS_STATSD_INTERVAL", 3), "Seconds between metric flush") //3
 	var statsdPrefix = flag.String("statsd_prefix", getEnvStr("PDNS_STATSD_PREFIX", "gopassivedns"), "statsd metric prefix")  //gopassivedns
+	var syslogFacility = flag.String("syslog_facility", getEnvStr("PDNS_SYSLOG_FACILITY", ""), "syslog facility")  //gopassivedns
+	var syslogPriority = flag.String("syslog_priority", getEnvStr("PDNS_SYSLOG_PRIORITY", "info"), "syslog priority")  //gopassivedns
 	var configFile = flag.String("config", getEnvStr("PDNS_CONFIG", ""), "config file")
 
 	flag.Parse()
@@ -96,6 +101,8 @@ func initConfig() *pdnsConfig {
 			statsdHost:		*statsdHost,
 			statsdInterval:	*statsdInterval,
 			statsdPrefix:	*statsdPrefix,
+			syslogFacility: *syslogFacility,
+			syslogPriority: *syslogPriority,
 		}
 	}
 	

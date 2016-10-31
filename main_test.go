@@ -6,6 +6,7 @@ import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/layers"
 import "github.com/quipo/statsd"
 import "os/user"
+import "log/syslog"
 import "os"
 import "time"
 import "net"
@@ -924,6 +925,75 @@ func TestInitHandleDev(t *testing.T) {
 			t.Logf("Error while building handle for %s", device.Name)
 		}
 	}
+}
+
+
+func TestParseLevel(t *testing.T) {
+
+}
+
+func TestParseFacility(t *testing.T) {
+	m := make(map[string]syslog.Priority)
+	
+	m["KERN"] = syslog.LOG_KERN
+	m["USER"] = syslog.LOG_USER
+	m["MAIL"] = syslog.LOG_MAIL
+	m["DAEMON"] = syslog.LOG_DAEMON
+	m["AUTH"] = syslog.LOG_AUTH
+	m["SYSLOG"] = syslog.LOG_SYSLOG
+	m["LPR"] = syslog.LOG_LPR
+	m["NEWS"] = syslog.LOG_NEWS
+	m["UUCP"] = syslog.LOG_UUCP
+	m["CRON"] = syslog.LOG_CRON
+	m["AUTHPRIV"] = syslog.LOG_AUTHPRIV
+	m["FTP"] = syslog.LOG_FTP
+	m["LOCAL0"] = syslog.LOG_LOCAL0
+	m["LOCAL1"] = syslog.LOG_LOCAL1
+	m["LOCAL2"] = syslog.LOG_LOCAL2
+	m["LOCAL3"] = syslog.LOG_LOCAL3
+	m["LOCAL4"] = syslog.LOG_LOCAL4
+	m["LOCAL5"] = syslog.LOG_LOCAL5
+	m["LOCAL6"] = syslog.LOG_LOCAL6
+	m["LOCAL7"] = syslog.LOG_LOCAL7
+	
+	for k, v := range m {
+		fac, err := facilityToType(k)
+		if fac != v || err != nil {
+			t.Fatalf("facility %s did not parse as a facility", k)
+		}
+	}
+	
+	fac, err := facilityToType("notafac")
+	if fac != 0 || err == nil {
+		t.Fatal("facility 'notafac' return an error")
+	}
+	
+}
+
+func TestParsePriority(t *testing.T) {
+	m := make(map[string]syslog.Priority)
+	
+		m["EMERG"] = syslog.LOG_EMERG
+		m["ALERT"] = syslog.LOG_ALERT
+		m["CRIT"] = syslog.LOG_CRIT
+		m["ERR"] = syslog.LOG_ERR
+		m["WARNING"] = syslog.LOG_WARNING
+		m["NOTICE"] = syslog.LOG_NOTICE
+		m["INFO"] = syslog.LOG_INFO
+		m["DEBUG"] = syslog.LOG_DEBUG
+	
+	for k, v := range m {
+		fac, err := levelToType(k)
+		if fac != v || err != nil {
+			t.Fatalf("facility %s did not parse as a facility", k)
+		}
+	}
+	
+	fac, err := levelToType("notapri")
+	if fac != 0 || err == nil {
+		t.Fatal("facility 'notafac' return an error")
+	}
+	
 }
 
 /*

@@ -19,28 +19,36 @@ Also a good choice.  Systems like Bro are generally deployed on network egresses
 Resolver support for query logging, including both the question and answer is spotty at best.  One of the most-deployed DNS servers, BIND, doesn't support it at all.  Others, like Windows DNS, have really horrible log formats.  Additionally, network-based logging will catch queries sent directly to remote servers (e.g. Google DNS) from your clients.
 
 ##Usage
+Configuration options can be specified as environment variables, in a .env file on on the command line.  The priority is command line flags, .env file, and finally variables already defined in the environment.  Configuration options are as below
 
-   * -dev [device]              network device for capture
-   * -bpf [bpf filter]          BPF filter for capture (default: port 53)
-   * -pcap [file]               pcap file to process
-   * -logfile [file]            log file for DNS lookups (suggested for small deployment or debugging only)
-   * -quiet                     don't log DNS lookups to STDOUT
-   * -debug                     enable debug logging to STDOUT
-   * -gc_age [num]              age at which incomplete connections should be garbage collected (default: -1m)
-   * -gc_interval [num]         interval at which GC should run on connection table (default: 3m)
-   * -kafka_brokers [brokers]   comma-separated list of kafka brokers
-   * -kafka_topic [topic]       kafka topic for logging
-   * -cpuprofile [file]         enable CPU profiling
-   * -numprocs [num]            number of goroutines to use for parsing packet data (default: 8)
-   * -pfring                    use PF_RING for packet capture
-   * -statsd_host               host and port of your statsd server (e.g. localhost:8125)
-   * -statsd_interval           the interval, in seconds, between sends to statsd
-   * -statsd_prefix             the metric name prefix to use (by default, gopassivedns)
-   * -name                      the name of this sensor for use in stats and log messages (defaults to hostname)
+   * -dev [device]              network device for capture (ENV: PDNS_DEV)
+   * -bpf [bpf filter]          BPF filter for capture (default: port 53) (ENV: PDNS_BPF)
+   * -pcap [file]               pcap file to process (ENV: PDNS_PCAP_FILE)
+   * -logfile [file]            log file for DNS lookups (suggested for small deployment or debugging only) (ENV: PDNS_LOG_FILE)
+   * -logMaxAge                 max age of a log file before rotation, in days (default: 28) (ENV: PDNS_LOG_AGE)
+   * -logMaxBackups             max number of files kept after rotation (default: 3) (ENV: PDNS_LOG_BACKUP)
+   * -logMaxSize                max size of log file before rotation, in MB (default: 100) (ENV: PDNS_LOG_SIZE)
+   * -quiet                     don't log DNS lookups to STDOUT (ENV: PDNS_QUIET)
+   * -debug                     enable debug logging to STDOUT (ENV: PDNS_DEBUG)
+   * -gc_age [num]              age at which incomplete connections should be garbage collected (default: -1m) (ENV: PDNS_GC_AGE)
+   * -gc_interval [num]         interval at which GC should run on connection table (default: 3m) (ENV: PDNS_GC_INTERVAL)
+   * -kafka_brokers [brokers]   comma-separated list of kafka brokers (ENV: PDNS_KAFKA_PEERS)
+   * -kafka_topic [topic]       kafka topic for logging (ENV: PDNS_KAFKA_TOPIC)
+   * -cpuprofile [file]         enable CPU profiling (ENV: PDNS_PROFILE_FILE)
+   * -numprocs [num]            number of goroutines to use for parsing packet data (default: 8) (ENV: PDNS_THREADS)
+   * -pfring                    use PF_RING for packet capture (ENV: PDNS_PFRING)
+   * -statsd_host               host and port of your statsd server (e.g. localhost:8125) (ENV: PDNS_STATSD_HOST)
+   * -statsd_interval           the interval, in seconds, between sends to statsd (ENV: PDNS_STATSD_INTERVAL)
+   * -statsd_prefix             the metric name prefix to use (by default, gopassivedns) (ENV: PDNS_STATSD_PREFIX)
+   * -name                      the name of this sensor for use in stats and log messages (defaults to hostname) (ENV: PDNS_NAME)
+   * -syslog_facility           syslog facility (ENV: PDNS_SYSLOG_FACILITY)
+   * -syslog_priority           syslog priority (ENV: PDNS_SYSLOG_PRIORITY)
 
 You must supply either -dev or -pcap.  
 
 There are known issues with goroutines and the standard daemonize process (https://github.com/golang/go/issues/227), so I strongly recommend you use one of the methods detaild here: http://stackoverflow.com/questions/10067295/how-to-start-a-go-program-as-a-daemon-in-ubuntu to run this process as a daemon using system tools.
+
+If you choose to use syslog logging, we use golang's "log/syslog" which requires a unix socket used to communicate with syslog to be at one of /dev/log, /var/run/log or /var/run/syslog.
 
 ##Deployment Guide
 
