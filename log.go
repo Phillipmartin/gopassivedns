@@ -24,6 +24,7 @@ type logOptions struct {
 	KafkaTopic   string
 	SyslogFacility string
 	SyslogPriority string
+	SyslogTag string
 	closed       bool
 	control      chan string
 }
@@ -40,6 +41,7 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		MaxBackups:	  config.logMaxBackups,
 		SyslogFacility: config.syslogFacility,
 		SyslogPriority: config.syslogPriority,
+		SyslogTag:	config.syslogTag,
 	}
 }
 
@@ -227,7 +229,7 @@ func logConnSyslog(logC chan dnsLogEntry, opts *logOptions) {
 		log.Fatalf("string '%s' did not parse as a facility", opts.SyslogFacility)
 	}
 	
-	logger, err := syslog.New(facility|level, "")
+	logger, err := syslog.New(facility|level, opts.SyslogTag)
 	if err != nil {
 		log.Fatalf("failed to connect to the local syslog daemon: %s", err)
 	}
