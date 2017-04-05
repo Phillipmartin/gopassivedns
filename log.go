@@ -60,7 +60,7 @@ func (lo *logOptions) LogToKafka() bool {
 }
 
 func (lo *logOptions) LogToSyslog() bool {
-	return !(lo.SyslogFacility == "" && lo.SyslogPriority == "")
+	return (lo.SyslogFacility != "" && lo.SyslogPriority != "")
 }
 
 // codebeat:disable[TOO_MANY_IVARS]
