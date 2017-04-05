@@ -31,6 +31,7 @@ type pdnsConfig struct {
 	statsdPrefix string
 	syslogFacility string
 	syslogPriority string
+	syslogTag string
 }
 
 func initConfig() *pdnsConfig {
@@ -58,6 +59,7 @@ func initConfig() *pdnsConfig {
 	var statsdPrefix = flag.String("statsd_prefix", getEnvStr("PDNS_STATSD_PREFIX", "gopassivedns"), "statsd metric prefix")  //gopassivedns
 	var syslogFacility = flag.String("syslog_facility", getEnvStr("PDNS_SYSLOG_FACILITY", ""), "syslog facility")  //gopassivedns
 	var syslogPriority = flag.String("syslog_priority", getEnvStr("PDNS_SYSLOG_PRIORITY", "info"), "syslog priority")  //gopassivedns
+	var syslogTag = flag.String("syslog_tag"), getEnvStr("PDNS_SYSLOG_TAG", ""), "syslog tag")
 	var configFile = flag.String("config", getEnvStr("PDNS_CONFIG", ""), "config file")
 
 	flag.Parse()
@@ -103,6 +105,7 @@ func initConfig() *pdnsConfig {
 			statsdPrefix:	*statsdPrefix,
 			syslogFacility: *syslogFacility,
 			syslogPriority: *syslogPriority,
+			syslogTag: 	*syslogTag,
 		}
 	}
 	
