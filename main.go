@@ -508,6 +508,11 @@ func main() {
 
 	if config.statsdHost != "" {
 		statsdclient := statsd.NewStatsdClient(config.statsdHost, config.statsdPrefix+"."+config.sensorName+".")
+		err := statsdclient.CreateSocket()
+		if err != nil {
+			log.Println(err)
+			os.Exit(1)
+		}
 		stats = statsd.NewStatsdBuffer(time.Duration(config.statsdInterval)*time.Second, statsdclient)
 	}
 
