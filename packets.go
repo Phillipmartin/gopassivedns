@@ -26,6 +26,7 @@ type packetData struct {
 	dns      *layers.DNS
 	payload  *gopacket.Payload
 }
+
 // codebeat:enable[TOO_MANY_IVARS]
 
 func NewTcpData(tcpdata tcpDataStruct) *packetData {

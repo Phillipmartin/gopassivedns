@@ -5,19 +5,19 @@ import "strconv"
 import "time"
 import "net"
 import "os"
+import "os/signal"
 import "io"
 import "runtime/pprof"
 import "encoding/binary"
+import "syscall"
 
 import "github.com/google/gopacket"
 import "github.com/google/gopacket/pcap"
 import "github.com/google/gopacket/tcpassembly"
 import "github.com/google/gopacket/tcpassembly/tcpreader"
 
-//import "github.com/google/gopacket/pfring"
 import "github.com/google/gopacket/layers"
 import "github.com/quipo/statsd"
-
 import _ "github.com/joho/godotenv/autoload"
 
 /*
@@ -356,7 +356,7 @@ func initHandle(config *pdnsConfig) *pcap.Handle {
 //kick off packet procesing threads and start the packet capture loop
 func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	config *pdnsConfig, reChan chan tcpDataStruct,
-	stats *statsd.StatsdBuffer) {
+	stats *statsd.StatsdBuffer, done chan bool) {
 
 	gcAgeDur, err := time.ParseDuration(config.gcAge)
 
@@ -440,18 +440,19 @@ CAPTURE:
 				log.Debug("packetSource returned nil.")
 				break CAPTURE
 			}
+		case <-done:
+			log.Printf("%s: doCapture cleanly exiting.", config.sensorName)
+			break CAPTURE
 		}
 	}
-
 	gracefulShutdown(channels, reChan, logChan)
-
 }
 
 //If we shut down without doing this stuff, we will lose some of the packet data
 //still in the processing pipeline.
 func gracefulShutdown(channels []chan *packetData, reChan chan tcpDataStruct, logChan chan dnsLogEntry) {
 
-	var wait_time int = 3
+	var wait_time int = 6
 	var numprocs int = len(channels)
 
 	log.Debug("Draining TCP data...")
@@ -485,14 +486,25 @@ OUTER:
 	}
 }
 
-
-
+// handle a graceful exit so that we do not lose data when we restart the service.
+func watchSignals(sig chan os.Signal, done chan bool) {
+	for {
+		select {
+		case <-sig:
+			log.Println("Caught signal about to cleanly exit.")
+			done <- true
+			// Sleeping 15 seconds while the gracefulshutdown function completes.
+			time.Sleep(time.Duration(15) * time.Second)
+			return
+		}
+	}
+}
 
 func main() {
 
 	//insert the ENV as defaults here, then after the parse we add the true defaults if nothing has been set
 	//also convert true/false strings to true/false types
-	
+
 	config := initConfig()
 
 	if config.cpuprofile != "" {
@@ -523,13 +535,18 @@ func main() {
 
 	reChan := make(chan tcpDataStruct)
 
+	sigs := make(chan os.Signal, 1)
+	done := make(chan bool, 1)
+
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
+
+	go watchSignals(sigs, done)
+
 	//spin up logging thread(s)
 	go logConn(logChan, logOpts, stats)
 
 	//spin up the actual capture threads
-	doCapture(handle, logChan, config, reChan, stats)
+	doCapture(handle, logChan, config, reChan, stats, done)
 
 	log.Debug("Done!  Goodbye.")
-	os.Exit(0)
-
 }
