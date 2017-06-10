@@ -14,30 +14,30 @@ import "log/syslog"
 
 // codebeat:disable[TOO_MANY_IVARS]
 type logOptions struct {
-	quiet        bool
-	debug        bool
-	Filename     string
-	MaxAge		 int
-	MaxBackups	 int
-	MaxSize		 int
-	KafkaBrokers string
-	KafkaTopic   string
+	quiet          bool
+	debug          bool
+	Filename       string
+	MaxAge         int
+	MaxBackups     int
+	MaxSize        int
+	KafkaBrokers   string
+	KafkaTopic     string
 	SyslogFacility string
 	SyslogPriority string
-	closed       bool
-	control      chan string
+	closed         bool
+	control        chan string
 }
 
 func NewLogOptions(config *pdnsConfig) *logOptions {
 	return &logOptions{
-		quiet:        config.quiet,
-		debug:        config.debug,
-		Filename:     config.logFile,
-		KafkaBrokers: config.kafkaBrokers,
-		KafkaTopic:   config.kafkaTopic,
-		MaxAge:		  config.logMaxAge,
-		MaxSize:	  config.logMaxSize,
-		MaxBackups:	  config.logMaxBackups,
+		quiet:          config.quiet,
+		debug:          config.debug,
+		Filename:       config.logFile,
+		KafkaBrokers:   config.kafkaBrokers,
+		KafkaTopic:     config.kafkaTopic,
+		MaxAge:         config.logMaxAge,
+		MaxSize:        config.logMaxSize,
+		MaxBackups:     config.logMaxBackups,
 		SyslogFacility: config.syslogFacility,
 		SyslogPriority: config.syslogPriority,
 	}
@@ -79,6 +79,7 @@ type dnsLogEntry struct {
 	encoded []byte //to hold the marshaled data structure
 	err     error  //encoding errors
 }
+
 // codebeat:enable[TOO_MANY_IVARS]
 
 //private, idempotent function that ensures the json is encoded
@@ -151,8 +152,8 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		logs = append(logs, kafkaChan)
 		go logConnKafka(kafkaChan, opts)
 	}
-	
-	if opts.LogToSyslog(){
+
+	if opts.LogToSyslog() {
 		log.Debug("syslog logging enabled")
 		syslogChan := make(chan dnsLogEntry)
 		logs = append(logs, syslogChan)
@@ -217,7 +218,7 @@ func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
 
 //logs to syslog
 func logConnSyslog(logC chan dnsLogEntry, opts *logOptions) {
-	
+
 	level, err := levelToType(opts.SyslogPriority)
 	if err != nil {
 		log.Fatalf("string '%s' did not parse as a priority", opts.SyslogPriority)
@@ -226,12 +227,12 @@ func logConnSyslog(logC chan dnsLogEntry, opts *logOptions) {
 	if err != nil {
 		log.Fatalf("string '%s' did not parse as a facility", opts.SyslogFacility)
 	}
-	
+
 	logger, err := syslog.New(facility|level, "")
 	if err != nil {
 		log.Fatalf("failed to connect to the local syslog daemon: %s", err)
 	}
-	
+
 	for message := range logC {
 		encoded, _ := message.Encode()
 		logger.Write([]byte(encoded))
@@ -289,23 +290,23 @@ func facilityToType(facility string) (syslog.Priority, error) {
 func levelToType(level string) (syslog.Priority, error) {
 	level = strings.ToUpper(level)
 	switch level {
-		case "EMERG":
-			return syslog.LOG_EMERG, nil
-		case "ALERT":
-			return syslog.LOG_ALERT, nil
-		case "CRIT":
-			return syslog.LOG_CRIT, nil
-		case "ERR":
-			return syslog.LOG_ERR, nil
-		case "WARNING":
-			return syslog.LOG_WARNING, nil
-		case "NOTICE":
-			return syslog.LOG_NOTICE, nil
-		case "INFO":
-			return syslog.LOG_INFO, nil
-		case "DEBUG":
-			return syslog.LOG_DEBUG, nil
-		default:
-			return 0, fmt.Errorf("Unknown priority: %s", level)
-		}
+	case "EMERG":
+		return syslog.LOG_EMERG, nil
+	case "ALERT":
+		return syslog.LOG_ALERT, nil
+	case "CRIT":
+		return syslog.LOG_CRIT, nil
+	case "ERR":
+		return syslog.LOG_ERR, nil
+	case "WARNING":
+		return syslog.LOG_WARNING, nil
+	case "NOTICE":
+		return syslog.LOG_NOTICE, nil
+	case "INFO":
+		return syslog.LOG_INFO, nil
+	case "DEBUG":
+		return syslog.LOG_DEBUG, nil
+	default:
+		return 0, fmt.Errorf("Unknown priority: %s", level)
+	}
 }

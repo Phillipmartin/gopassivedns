@@ -229,71 +229,71 @@ func TestDefaultConfig(t *testing.T) {
 	//os.Setenv("PDNS_CONFIG", "")
 
 	config := initConfig()
-	
+
 	if config.device != "aaa" {
 		t.Fatal("")
 	}
-	
+
 	if config.kafkaBrokers != "bbb" {
 		t.Fatal("")
 	}
-	
+
 	if config.kafkaTopic != "ccc" {
 		t.Fatal("")
 	}
-	
+
 	if config.bpf != "ddd" {
 		t.Fatal("")
 	}
-	
+
 	if config.pcapFile != "eee" {
 		t.Fatal("")
 	}
-	
+
 	if config.logFile != "fff" {
 		t.Fatal("")
 	}
-	
+
 	if config.logMaxAge != 111 {
 		t.Fatal("")
 	}
-	
+
 	if config.logMaxBackups != 3 {
 		t.Fatal("")
 	}
-	
+
 	if config.logMaxSize != 100 {
 		t.Fatal("")
 	}
-	
+
 	if config.quiet != false {
 		t.Fatal("")
 	}
-	
+
 	if config.gcAge != "-1m" {
 		t.Fatal("")
 	}
-	
+
 	if config.gcInterval != "3m" {
 		t.Fatal("")
 	}
-	
+
 	if config.debug != false {
 		t.Fatal("")
 	}
-	
+
 	if config.cpuprofile != "ggg" {
 		t.Fatal("")
 	}
-	
+
 	if config.numprocs != 8 {
 		t.Fatal("")
 	}
-	
+
 	if config.pfring != true {
 		t.Fatal("")
 	}
-	
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		if config.sensorName != "UNKNOWN" {
@@ -308,15 +308,15 @@ func TestDefaultConfig(t *testing.T) {
 	if config.statsdHost != "iii" {
 		t.Fatal("")
 	}
-	
+
 	if config.statsdInterval != 777 {
 		t.Fatal("")
 	}
-	
+
 	if config.statsdPrefix != "jjj" {
 		t.Fatal("")
 	}
-	
+
 	os.Unsetenv("PDNS_DEV")
 	os.Unsetenv("PDNS_KAFKA_PEERS")
 	os.Unsetenv("PDNS_KAFKA_TOPIC")
@@ -337,7 +337,7 @@ func TestDefaultConfig(t *testing.T) {
 	os.Unsetenv("PDNS_STATSD_HOST")
 	os.Unsetenv("PDNS_STATSD_INTERVAL")
 	os.Unsetenv("PDNS_STATSD_PREFIX")
-	
+
 }
 
 func TestParseA(t *testing.T) {
@@ -759,10 +759,11 @@ func TestDoCaptureUDP(t *testing.T) {
 	var logChan = make(chan dnsLogEntry, 100)
 	var reChan = make(chan tcpDataStruct)
 	var logStash = make(chan dnsLogEntry, 100)
+	var done = make(chan bool, 1)
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, &pdnsConfig{gcAge:"-1m", gcInterval:"3m", numprocs: 8}, reChan, stats)
+	doCapture(handle, logChan, &pdnsConfig{gcAge: "-1m", gcInterval: "3m", numprocs: 8}, reChan, stats, done)
 
 	logs := ToSlice(logStash)
 
@@ -778,10 +779,11 @@ func TestDoCaptureTCP(t *testing.T) {
 	var logChan = make(chan dnsLogEntry, 400)
 	var reChan = make(chan tcpDataStruct, 1000)
 	var logStash = make(chan dnsLogEntry, 400)
+	var done = make(chan bool, 1)
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, &pdnsConfig{gcAge:"-1m", gcInterval:"3m", numprocs: 8}, reChan, stats)
+	doCapture(handle, logChan, &pdnsConfig{gcAge: "-1m", gcInterval: "3m", numprocs: 8}, reChan, stats, done)
 
 	logs := ToSlice(logStash)
 
@@ -927,14 +929,13 @@ func TestInitHandleDev(t *testing.T) {
 	}
 }
 
-
 func TestParseLevel(t *testing.T) {
 
 }
 
 func TestParseFacility(t *testing.T) {
 	m := make(map[string]syslog.Priority)
-	
+
 	m["KERN"] = syslog.LOG_KERN
 	m["USER"] = syslog.LOG_USER
 	m["MAIL"] = syslog.LOG_MAIL
@@ -955,45 +956,45 @@ func TestParseFacility(t *testing.T) {
 	m["LOCAL5"] = syslog.LOG_LOCAL5
 	m["LOCAL6"] = syslog.LOG_LOCAL6
 	m["LOCAL7"] = syslog.LOG_LOCAL7
-	
+
 	for k, v := range m {
 		fac, err := facilityToType(k)
 		if fac != v || err != nil {
 			t.Fatalf("facility %s did not parse as a facility", k)
 		}
 	}
-	
+
 	fac, err := facilityToType("notafac")
 	if fac != 0 || err == nil {
 		t.Fatal("facility 'notafac' return an error")
 	}
-	
+
 }
 
 func TestParsePriority(t *testing.T) {
 	m := make(map[string]syslog.Priority)
-	
-		m["EMERG"] = syslog.LOG_EMERG
-		m["ALERT"] = syslog.LOG_ALERT
-		m["CRIT"] = syslog.LOG_CRIT
-		m["ERR"] = syslog.LOG_ERR
-		m["WARNING"] = syslog.LOG_WARNING
-		m["NOTICE"] = syslog.LOG_NOTICE
-		m["INFO"] = syslog.LOG_INFO
-		m["DEBUG"] = syslog.LOG_DEBUG
-	
+
+	m["EMERG"] = syslog.LOG_EMERG
+	m["ALERT"] = syslog.LOG_ALERT
+	m["CRIT"] = syslog.LOG_CRIT
+	m["ERR"] = syslog.LOG_ERR
+	m["WARNING"] = syslog.LOG_WARNING
+	m["NOTICE"] = syslog.LOG_NOTICE
+	m["INFO"] = syslog.LOG_INFO
+	m["DEBUG"] = syslog.LOG_DEBUG
+
 	for k, v := range m {
 		fac, err := levelToType(k)
 		if fac != v || err != nil {
 			t.Fatalf("facility %s did not parse as a facility", k)
 		}
 	}
-	
+
 	fac, err := levelToType("notapri")
 	if fac != 0 || err == nil {
 		t.Fatal("facility 'notafac' return an error")
 	}
-	
+
 }
 
 /*
@@ -1002,17 +1003,17 @@ func TestInitLogging(t *testing.T){
 }
 */
 
-func TestMain(m *testing.M){
+func TestMain(m *testing.M) {
 	var statsdHost = flag.String("test_statsd_host", "", "Statsd server hostname or IP")
 	var statsdInterval = flag.Int("test_statsd_interval", 3, "Seconds between metric flush")
 	var statsdPrefix = flag.String("test_statsd_prefix", "gopassivedns", "statsd metric prefix")
-	
+
 	flag.Parse()
-	
+
 	if *statsdHost != "" {
 		statsdclient := statsd.NewStatsdClient(*statsdHost, *statsdPrefix)
 		stats = statsd.NewStatsdBuffer(time.Duration(*statsdInterval)*time.Second, statsdclient)
 	}
-	
+
 	os.Exit(m.Run())
 }
