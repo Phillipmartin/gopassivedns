@@ -1,16 +1,18 @@
 package main
 
-import "bufio"
-import "net"
-import "fmt"
-import "time"
-import "strconv"
-import "strings"
-import "gopkg.in/natefinch/lumberjack.v2"
-import "github.com/pquerna/ffjson/ffjson"
-import log "github.com/Sirupsen/logrus"
-import "github.com/quipo/statsd"
-import "log/syslog"
+import (
+	"bufio"
+	"fmt"
+	log "github.com/Sirupsen/logrus"
+	"github.com/pquerna/ffjson/ffjson"
+	"github.com/quipo/statsd"
+	"gopkg.in/natefinch/lumberjack.v2"
+	"log/syslog"
+	"net"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // codebeat:disable[TOO_MANY_IVARS]
 type logOptions struct {
@@ -109,7 +111,7 @@ func initLogging(opts *logOptions) chan dnsLogEntry {
 	//TODO: further logging setup?
 
 	/* spin up logging channel */
-	var logChan = make(chan dnsLogEntry, 100)
+	var logChan = make(chan dnsLogEntry, 1000)
 
 	return logChan
 

@@ -1,16 +1,18 @@
 package main
 
-import "testing"
-import "github.com/google/gopacket"
-import "github.com/google/gopacket/pcap"
-import "github.com/google/gopacket/layers"
-import "github.com/quipo/statsd"
-import "os/user"
-import "log/syslog"
-import "os"
-import "time"
-import "net"
-import "flag"
+import (
+	"flag"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"github.com/quipo/statsd"
+	"log/syslog"
+	"net"
+	"os"
+	"os/user"
+	"testing"
+	"time"
+)
 
 var stats *statsd.StatsdBuffer = nil
 

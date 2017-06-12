@@ -1,24 +1,24 @@
 package main
 
-import log "github.com/Sirupsen/logrus"
-import "strconv"
-import "time"
-import "net"
-import "os"
-import "os/signal"
-import "io"
-import "runtime/pprof"
-import "encoding/binary"
-import "syscall"
-
-import "github.com/google/gopacket"
-import "github.com/google/gopacket/pcap"
-import "github.com/google/gopacket/tcpassembly"
-import "github.com/google/gopacket/tcpassembly/tcpreader"
-
-import "github.com/google/gopacket/layers"
-import "github.com/quipo/statsd"
-import _ "github.com/joho/godotenv/autoload"
+import (
+	"encoding/binary"
+	log "github.com/Sirupsen/logrus"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/tcpassembly/tcpreader"
+	_ "github.com/joho/godotenv/autoload"
+	"github.com/quipo/statsd"
+	"io"
+	"net"
+	"os"
+	"os/signal"
+	"runtime/pprof"
+	"strconv"
+	"syscall"
+	"time"
+)
 
 /*
 
@@ -376,7 +376,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
 	for i := 0; i < config.numprocs; i++ {
-		channels = append(channels, make(chan *packetData, 100))
+		channels = append(channels, make(chan *packetData, 500))
 	}
 
 	for i := 0; i < config.numprocs; i++ {
