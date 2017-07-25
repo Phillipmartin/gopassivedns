@@ -1,8 +1,10 @@
 package main
 
-import "strconv"
-import "github.com/google/gopacket/layers"
-import "github.com/google/gopacket"
+import (
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"strconv"
+)
 
 /*
    The gopacket DNS layer doesn't have a lot of good String()

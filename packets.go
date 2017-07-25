@@ -1,10 +1,12 @@
 package main
 
-import "time"
-import "errors"
-import "net"
-import "github.com/google/gopacket"
-import "github.com/google/gopacket/layers"
+import (
+	"errors"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"net"
+	"time"
+)
 
 /*
   struct to store either reassembled TCP streams or packets
