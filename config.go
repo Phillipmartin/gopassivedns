@@ -1,9 +1,11 @@
 package main
 
-import "os"
-import "strconv"
-import "flag"
-import log "github.com/Sirupsen/logrus"
+import (
+	"flag"
+	log "github.com/Sirupsen/logrus"
+	"os"
+	"strconv"
+)
 
 // codebeat:disable[TOO_MANY_IVARS]
 type pdnsConfig struct {

@@ -18,9 +18,8 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
-	"github.com/quipo/statsd"
-
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/quipo/statsd"
 )
 
 /*
@@ -174,7 +173,7 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 //background task to clear out stale entries in the conntable
 //one of these gets spun up for every packet handling thread
 //takes a pointer to the contable to clean, the maximum age of an entry and how often to run GC
-func cleanDnsCache(conntable *map[string]dnsMapEntry, maxAge time.Duration,
+func cleanDnsCache(conntable *map[int64]dnsMapEntry, maxAge time.Duration,
 	interval time.Duration, threadNum int, stats *statsd.StatsdBuffer) {
 
 	for {
@@ -187,7 +186,7 @@ func cleanDnsCache(conntable *map[string]dnsMapEntry, maxAge time.Duration,
 		}
 		for key, item := range *conntable {
 			if item.inserted.Before(cleanupCutoff) {
-				log.Debug("conntable GC(" + strconv.Itoa(threadNum) + "): cleanup for unique combination " + key)
+				log.Debug("conntable GC(" + strconv.Itoa(threadNum) + "): cleanup for unique combination " + strconv.FormatInt(key, 10))
 				delete(*conntable, key)
 				if stats != nil {
 					stats.Incr(strconv.Itoa(threadNum)+".cache_entries_dropped", 1)
@@ -197,13 +196,13 @@ func cleanDnsCache(conntable *map[string]dnsMapEntry, maxAge time.Duration,
 	}
 }
 
-func handleDns(conntable *map[string]dnsMapEntry,
+func handleDns(conntable *map[int64]dnsMapEntry,
 	dns *layers.DNS,
 	logC chan dnsLogEntry,
 	srcIP net.IP,
 	dstIP net.IP,
-	srcPort string,
-	dstPort string) {
+	srcPort int,
+	dstPort int) {
 	//skip non-query stuff (Updates, AXFRs, etc)
 	if dns.OpCode != layers.DNSOpCodeQuery {
 		log.Debug("Saw non-query DNS packet")
@@ -214,11 +213,23 @@ func handleDns(conntable *map[string]dnsMapEntry,
 	//pre-allocated for initLogEntry
 	logs := []dnsLogEntry{}
 	// generate a more unique key for a conntable map to avoid hash key collisions as dns.ID is not very unique
-	var uid string
-	if dstPort == "53(domain)" {
-		uid = fmt.Sprintf("%s->%s:%s", strconv.Itoa(int(dns.ID)), srcPort, dstPort)
+	var uid int64
+	if dstPort == 53 {
+		concat := strconv.Itoa(srcPort)
+		concat += strconv.Itoa(int(dns.ID))
+		var err error
+		uid, err = strconv.ParseInt(concat, 10, 64)
+		if err != nil {
+			log.Debug(fmt.Sprintf("Could not convert %s into int64", concat))
+		}
 	} else {
-		uid = fmt.Sprintf("%s->%s:%s", strconv.Itoa(int(dns.ID)), dstPort, srcPort)
+		concat := strconv.Itoa(dstPort)
+		concat += strconv.Itoa(int(dns.ID))
+		var err error
+		uid, err = strconv.ParseInt(concat, 10, 64)
+		if err != nil {
+			log.Debug(fmt.Sprintf("Could not convert %s into int64", concat))
+		}
 	}
 
 	//lookup the query source port->dest port:query ID in our connection table
@@ -268,7 +279,7 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 	stats *statsd.StatsdBuffer) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
-	var conntable = make(map[string]dnsMapEntry)
+	var conntable = make(map[int64]dnsMapEntry)
 
 	//setup garbage collection for this map
 	go cleanDnsCache(&conntable, gcAge, gcInterval, threadNum, stats)
@@ -303,16 +314,16 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 			//parse as DNS, nor will the connection closing.
 
 			if packet.IsTCPStream() {
-				srcPort := "0"
-				dstPort := "0"
+				srcPort := 0
+				dstPort := 0
 				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP, srcPort, dstPort)
 			} else if packet.HasTCPLayer() {
 				assembler.AssembleWithTimestamp(packet.GetIPLayer().NetworkFlow(),
 					packet.GetTCPLayer(), *packet.GetTimestamp())
 				continue
 			} else if packet.HasDNSLayer() {
-				srcPort := packet.udpLayer.SrcPort.String()
-				dstPort := packet.udpLayer.DstPort.String()
+				srcPort := int(packet.udpLayer.DstPort)
+				dstPort := int(packet.udpLayer.SrcPort)
 				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP, srcPort, dstPort)
 				if stats != nil {
 					stats.Incr(strconv.Itoa(threadNum)+".dns_lookups", 1)
@@ -395,7 +406,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
 	for i := 0; i < config.numprocs; i++ {
-		channels = append(channels, make(chan *packetData, 100))
+		channels = append(channels, make(chan *packetData, 500))
 	}
 
 	for i := 0; i < config.numprocs; i++ {
