@@ -2,14 +2,7 @@ package main
 
 import (
 	"encoding/binary"
-	log "github.com/Sirupsen/logrus"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
-	_ "github.com/joho/godotenv/autoload"
-	"github.com/quipo/statsd"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -18,6 +11,15 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/tcpassembly/tcpreader"
+	_ "github.com/joho/godotenv/autoload"
+	"github.com/quipo/statsd"
 )
 
 /*
@@ -171,7 +173,7 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 //background task to clear out stale entries in the conntable
 //one of these gets spun up for every packet handling thread
 //takes a pointer to the contable to clean, the maximum age of an entry and how often to run GC
-func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration,
+func cleanDnsCache(conntable *map[int64]dnsMapEntry, maxAge time.Duration,
 	interval time.Duration, threadNum int, stats *statsd.StatsdBuffer) {
 
 	for {
@@ -184,7 +186,7 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration,
 		}
 		for key, item := range *conntable {
 			if item.inserted.Before(cleanupCutoff) {
-				log.Debug("conntable GC(" + strconv.Itoa(threadNum) + "): cleanup query ID " + strconv.Itoa(int(key)))
+				log.Debug("conntable GC(" + strconv.Itoa(threadNum) + "): cleanup for unique combination " + strconv.FormatInt(key, 10))
 				delete(*conntable, key)
 				if stats != nil {
 					stats.Incr(strconv.Itoa(threadNum)+".cache_entries_dropped", 1)
@@ -194,8 +196,13 @@ func cleanDnsCache(conntable *map[uint16]dnsMapEntry, maxAge time.Duration,
 	}
 }
 
-func handleDns(conntable *map[uint16]dnsMapEntry, dns *layers.DNS, logC chan dnsLogEntry,
-	srcIP net.IP, dstIP net.IP) {
+func handleDns(conntable *map[int64]dnsMapEntry,
+	dns *layers.DNS,
+	logC chan dnsLogEntry,
+	srcIP net.IP,
+	dstIP net.IP,
+	srcPort int,
+	dstPort int) {
 	//skip non-query stuff (Updates, AXFRs, etc)
 	if dns.OpCode != layers.DNSOpCodeQuery {
 		log.Debug("Saw non-query DNS packet")
@@ -205,9 +212,28 @@ func handleDns(conntable *map[uint16]dnsMapEntry, dns *layers.DNS, logC chan dns
 
 	//pre-allocated for initLogEntry
 	logs := []dnsLogEntry{}
+	// generate a more unique key for a conntable map to avoid hash key collisions as dns.ID is not very unique
+	var uid int64
+	if dstPort == 53 {
+		concat := strconv.Itoa(srcPort)
+		concat += strconv.Itoa(int(dns.ID))
+		var err error
+		uid, err = strconv.ParseInt(concat, 10, 64)
+		if err != nil {
+			log.Debug(fmt.Sprintf("Could not convert %s into int64", concat))
+		}
+	} else {
+		concat := strconv.Itoa(dstPort)
+		concat += strconv.Itoa(int(dns.ID))
+		var err error
+		uid, err = strconv.ParseInt(concat, 10, 64)
+		if err != nil {
+			log.Debug(fmt.Sprintf("Could not convert %s into int64", concat))
+		}
+	}
 
-	//lookup the query ID in our connection table
-	item, foundItem := (*conntable)[dns.ID]
+	//lookup the query source port->dest port:query ID in our connection table
+	item, foundItem := (*conntable)[uid]
 
 	//this is a Query Response packet and we saw the question go out...
 	//if we saw a leg of this already...
@@ -216,14 +242,14 @@ func handleDns(conntable *map[uint16]dnsMapEntry, dns *layers.DNS, logC chan dns
 		logs = nil
 		//if we just got the reply
 		if dns.QR {
-			log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(dns.ID)))
+			log.Debug(fmt.Printf("Got 'answer' leg of a combination of src port->dst port:query ID: %s", uid))
 			initLogEntry(srcIP, dstIP, item.entry, *dns, &logs)
 		} else {
 			//we just got the question, so we should already have the reply
-			log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
+			log.Debug(fmt.Printf("Got the 'question' leg of a combination of src port->dst port:query ID: %s", uid))
 			initLogEntry(srcIP, dstIP, *dns, item.entry, &logs)
 		}
-		delete(*conntable, dns.ID)
+		delete(*conntable, uid)
 
 		//TODO: send the array itself, not the elements of the array
 		//to reduce the number of channel transactions
@@ -238,7 +264,7 @@ func handleDns(conntable *map[uint16]dnsMapEntry, dns *layers.DNS, logC chan dns
 			entry:    *dns,
 			inserted: time.Now(),
 		}
-		(*conntable)[dns.ID] = mapEntry
+		(*conntable)[uid] = mapEntry
 
 	}
 }
@@ -253,7 +279,7 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 	stats *statsd.StatsdBuffer) {
 
 	//DNS IDs are stored as uint16s by the gopacket DNS layer
-	var conntable = make(map[uint16]dnsMapEntry)
+	var conntable = make(map[int64]dnsMapEntry)
 
 	//setup garbage collection for this map
 	go cleanDnsCache(&conntable, gcAge, gcInterval, threadNum, stats)
@@ -288,13 +314,17 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 			//parse as DNS, nor will the connection closing.
 
 			if packet.IsTCPStream() {
-				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP)
+				srcPort := 0
+				dstPort := 0
+				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP, srcPort, dstPort)
 			} else if packet.HasTCPLayer() {
 				assembler.AssembleWithTimestamp(packet.GetIPLayer().NetworkFlow(),
 					packet.GetTCPLayer(), *packet.GetTimestamp())
 				continue
 			} else if packet.HasDNSLayer() {
-				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP)
+				srcPort := int(packet.udpLayer.DstPort)
+				dstPort := int(packet.udpLayer.SrcPort)
+				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP, srcPort, dstPort)
 				if stats != nil {
 					stats.Incr(strconv.Itoa(threadNum)+".dns_lookups", 1)
 				}
