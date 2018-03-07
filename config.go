@@ -2,9 +2,10 @@ package main
 
 import (
 	"flag"
-	log "github.com/Sirupsen/logrus"
 	"os"
 	"strconv"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 // codebeat:disable[TOO_MANY_IVARS]
@@ -33,6 +34,8 @@ type pdnsConfig struct {
 	statsdPrefix   string
 	syslogFacility string
 	syslogPriority string
+	fluentdSocket  string
+	snapLen        int32
 }
 
 func initConfig() *pdnsConfig {
@@ -56,11 +59,13 @@ func initConfig() *pdnsConfig {
 	var pfring = flag.Bool("pfring", getEnvBool("PDNS_PFRING", false), "Capture using PF_RING")
 	var sensorName = flag.String("name", getEnvStr("PDNS_NAME", ""), "sensor name used in logging and stats reporting")
 	var statsdHost = flag.String("statsd_host", getEnvStr("PDNS_STATSD_HOST", ""), "Statsd server hostname or IP")
-	var statsdInterval = flag.Int("statsd_interval", getEnvInt("PDNS_STATSD_INTERVAL", 3), "Seconds between metric flush")   //3
+	var statsdInterval = flag.Int("statsd_interval", getEnvInt("PDNS_STATSD_INTERVAL", 5), "Seconds between metric flush")   //3
 	var statsdPrefix = flag.String("statsd_prefix", getEnvStr("PDNS_STATSD_PREFIX", "gopassivedns"), "statsd metric prefix") //gopassivedns
 	var syslogFacility = flag.String("syslog_facility", getEnvStr("PDNS_SYSLOG_FACILITY", ""), "syslog facility")            //gopassivedns
-	var syslogPriority = flag.String("syslog_priority", getEnvStr("PDNS_SYSLOG_PRIORITY", "info"), "syslog priority")        //gopassivedns
+	var syslogPriority = flag.String("syslog_priority", getEnvStr("PDNS_SYSLOG_PRIORITY", ""), "syslog priority")            //gopassivedns
 	var configFile = flag.String("config", getEnvStr("PDNS_CONFIG", ""), "config file")
+	var fluentdSocket = flag.String("fluentd_socket", getEnvStr("PDNS_FLUENTD_SOCKET", ""), "Path to Fluentd unix socket")
+	var snapLen = flag.Int("snaplen", getEnvInt("PDNS_SNAPLEN", 4096), "The snaplen used in the pcap handle")
 
 	flag.Parse()
 
@@ -105,6 +110,8 @@ func initConfig() *pdnsConfig {
 			statsdPrefix:   *statsdPrefix,
 			syslogFacility: *syslogFacility,
 			syslogPriority: *syslogPriority,
+			fluentdSocket:  *fluentdSocket,
+			snapLen:        int32(*snapLen),
 		}
 	}
 

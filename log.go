@@ -3,15 +3,19 @@ package main
 import (
 	"bufio"
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"github.com/pquerna/ffjson/ffjson"
-	"github.com/quipo/statsd"
-	"gopkg.in/natefinch/lumberjack.v2"
+
 	"log/syslog"
 	"net"
+
 	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/pquerna/ffjson/ffjson"
+	"github.com/quipo/statsd"
+	"github.com/vmihailenco/msgpack"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
 // codebeat:disable[TOO_MANY_IVARS]
@@ -19,6 +23,7 @@ type logOptions struct {
 	quiet          bool
 	debug          bool
 	Filename       string
+	FluentdSocket  string
 	MaxAge         int
 	MaxBackups     int
 	MaxSize        int
@@ -26,6 +31,7 @@ type logOptions struct {
 	KafkaTopic     string
 	SyslogFacility string
 	SyslogPriority string
+	SensorName     string
 	closed         bool
 	control        chan string
 }
@@ -35,6 +41,7 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		quiet:          config.quiet,
 		debug:          config.debug,
 		Filename:       config.logFile,
+		FluentdSocket:  config.fluentdSocket,
 		KafkaBrokers:   config.kafkaBrokers,
 		KafkaTopic:     config.kafkaTopic,
 		MaxAge:         config.logMaxAge,
@@ -42,6 +49,7 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		MaxBackups:     config.logMaxBackups,
 		SyslogFacility: config.syslogFacility,
 		SyslogPriority: config.syslogPriority,
+		SensorName:     config.sensorName,
 	}
 }
 
@@ -65,18 +73,31 @@ func (lo *logOptions) LogToSyslog() bool {
 	return (lo.SyslogFacility != "" && lo.SyslogPriority != "")
 }
 
+func (lo *logOptions) LogToFluentd() bool {
+	return (lo.FluentdSocket != "")
+}
+
 // codebeat:disable[TOO_MANY_IVARS]
 type dnsLogEntry struct {
-	Query_ID      uint16 `json:"query_id"`
-	Response_Code int    `json:"response_code"`
-	Question      string `json:"question"`
-	Question_Type string `json:"question_type"`
-	Answer        string `json:"answer"`
-	Answer_Type   string `json:"answer_type"`
-	TTL           uint32 `json:"ttl"`
-	Server        net.IP `json:"server"`
-	Client        net.IP `json:"client"`
-	Timestamp     string `json:"timestamp"`
+	Query_ID             uint16 `json:"query_id"`
+	Response_Code        int    `json:"rcode"`
+	Question             string `json:"q"`
+	Question_Type        string `json:"qtype"`
+	Answer               string `json:"a"`
+	Answer_Type          string `json:"atype"`
+	TTL                  uint32 `json:"ttl"`
+	Server               net.IP `json:"dst"`
+	Client               net.IP `json:"src"`
+	Timestamp            string `json:"tstamp"`
+	Elapsed              int64  `json:"elapsed"`
+	Client_Port          string `json:"sport"`
+	Level                string `json:"level"` // syslog level
+	Length               int    `json:"bytes"`
+	Proto                string `json:"protocol"`
+	Truncated            bool   `json:"truncated"`
+	Authoritative_Answer bool   `json:"aa"`
+	Recursion_Desired    bool   `json:"rd"`
+	Recursion_Available  bool   `json:"ra"`
 
 	encoded []byte //to hold the marshaled data structure
 	err     error  //encoding errors
@@ -92,7 +113,7 @@ func (dle *dnsLogEntry) ensureEncoded() {
 }
 
 //returns length of the encoded JSON
-func (dle *dnsLogEntry) Length() int {
+func (dle *dnsLogEntry) Size() int {
 	dle.ensureEncoded()
 	return len(dle.encoded)
 }
@@ -103,7 +124,7 @@ func (dle *dnsLogEntry) Encode() ([]byte, error) {
 	return dle.encoded, dle.err
 }
 
-func initLogging(opts *logOptions) chan dnsLogEntry {
+func initLogging(opts *logOptions, config *pdnsConfig) chan dnsLogEntry {
 	if opts.IsDebug() {
 		log.SetLevel(log.DebugLevel)
 	}
@@ -111,7 +132,7 @@ func initLogging(opts *logOptions) chan dnsLogEntry {
 	//TODO: further logging setup?
 
 	/* spin up logging channel */
-	var logChan = make(chan dnsLogEntry, 1000)
+	var logChan = make(chan dnsLogEntry, packetQueue*config.numprocs)
 
 	return logChan
 
@@ -124,7 +145,7 @@ func watchLogStats(stats *statsd.StatsdBuffer, logC chan dnsLogEntry, logs []cha
 			stats.Gauge(strconv.Itoa(i)+".log_depth", int64(len(logChan)))
 		}
 
-		time.Sleep(3)
+		time.Sleep(15 * time.Second)
 	}
 }
 
@@ -160,6 +181,13 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		syslogChan := make(chan dnsLogEntry)
 		logs = append(logs, syslogChan)
 		go logConnSyslog(syslogChan, opts)
+	}
+
+	if opts.LogToFluentd() {
+		log.Debug("fluentd logging enabled")
+		fluentdlogChan := make(chan dnsLogEntry)
+		logs = append(logs, fluentdlogChan)
+		go logConnFluentd(fluentdlogChan, opts)
 	}
 
 	if stats != nil {
@@ -241,6 +269,35 @@ func logConnSyslog(logC chan dnsLogEntry, opts *logOptions) {
 	}
 }
 
+//logs to fluentd via a unix socket
+func logConnFluentd(logC chan dnsLogEntry, opts *logOptions) {
+	Tag := opts.SensorName + ".service"
+	tag, _ := msgpack.Marshal(Tag)
+
+	conn := fluentdSocket(opts.FluentdSocket)
+	defer conn.Close()
+
+	for message := range logC {
+		tm, _ := msgpack.Marshal(time.Now().Unix())
+		rec, err := msgpack.Marshal(&message)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		encoded := []byte{0x93}
+		encoded = append(encoded, tag...)
+		encoded = append(encoded, tm...)
+		encoded = append(encoded, rec...)
+
+		_, err = conn.Write(encoded)
+
+		if err != nil {
+			log.Fatalf("Unable to write to UNIX Socket %+v with err %+v\n", opts.FluentdSocket, err)
+		}
+	}
+}
+
 func facilityToType(facility string) (syslog.Priority, error) {
 	facility = strings.ToUpper(facility)
 	switch facility {
@@ -311,4 +368,38 @@ func levelToType(level string) (syslog.Priority, error) {
 	default:
 		return 0, fmt.Errorf("Unknown priority: %s", level)
 	}
+}
+
+func fluentdSocket(path string) *net.UnixConn {
+	var retries int = 10
+	var timeout time.Duration = 5
+
+	// we want to have retries because fluentd can take some time to start.
+	for i := 1; i <= retries; i++ {
+		raddr, err := net.ResolveUnixAddr("unix", path)
+
+		if err != nil {
+			log.Printf("Failed to open remote socket. %s.\n", err)
+		}
+
+		conn, err := net.DialUnix("unix", nil, raddr)
+
+		if err != nil {
+			log.Printf("Failed to connect to fluentd socket. %s retrying in 5 seconds.", err)
+			time.Sleep(timeout * time.Second)
+			continue
+		}
+
+		err = conn.SetWriteBuffer(65536)
+
+		if err != nil {
+			log.Printf("Unable to set fluentd write buffer. %s", err)
+		}
+
+		return conn
+	}
+
+	log.Fatalf("Unable to open connection to fluentd socket after %d retries\n", retries)
+
+	return nil
 }

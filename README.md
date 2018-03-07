@@ -22,6 +22,7 @@ Resolver support for query logging, including both the question and answer is sp
 Configuration options can be specified as environment variables, in a .env file on on the command line.  The priority is command line flags, .env file, and finally variables already defined in the environment.  Configuration options are as below
 
    * -dev [device]              network device for capture (ENV: PDNS_DEV)
+   * -fluentd_socket [socket]   Path to Fluentd unix socket used for logging in messagepack format (ENV: PDNS_FLUENTD_SOCKET)
    * -bpf [bpf filter]          BPF filter for capture (default: port 53) (ENV: PDNS_BPF)
    * -pcap [file]               pcap file to process (ENV: PDNS_PCAP_FILE)
    * -logfile [file]            log file for DNS lookups (suggested for small deployment or debugging only) (ENV: PDNS_LOG_FILE)
@@ -40,6 +41,7 @@ Configuration options can be specified as environment variables, in a .env file 
    * -statsd_host               host and port of your statsd server (e.g. localhost:8125) (ENV: PDNS_STATSD_HOST)
    * -statsd_interval           the interval, in seconds, between sends to statsd (ENV: PDNS_STATSD_INTERVAL)
    * -statsd_prefix             the metric name prefix to use (by default, gopassivedns) (ENV: PDNS_STATSD_PREFIX)
+   * -snaplen [int]             the snaplen used for the pcap buffer
    * -name                      the name of this sensor for use in stats and log messages (defaults to hostname) (ENV: PDNS_NAME)
    * -syslog_facility           syslog facility (ENV: PDNS_SYSLOG_FACILITY)
    * -syslog_priority           syslog priority (ENV: PDNS_SYSLOG_PRIORITY)
