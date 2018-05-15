@@ -9,17 +9,17 @@ import (
 	"os/signal"
 	"runtime/pprof"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
-	_ "github.com/joho/godotenv/autoload"
 	"github.com/quipo/statsd"
+	log "github.com/Sirupsen/logrus"
 )
 
 /*
@@ -35,6 +35,14 @@ Structs and helper functions
 type dnsMapEntry struct {
 	entry    layers.DNS
 	inserted time.Time
+}
+
+/*
+  struct for DNS connection table
+*/
+type connectionTable struct {
+	connections map[string]dnsMapEntry
+	sync.RWMutex
 }
 
 /*
@@ -62,6 +70,11 @@ type dnsStream struct {
 	net, transport gopacket.Flow
 	r              tcpreader.ReaderStream
 }
+
+/*
+  create constant for the packetQueue as this is used in multiple places.
+*/
+const packetQueue int = 500
 
 func (d *dnsStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
 	dstream := &dnsStream{
@@ -117,7 +130,17 @@ func (d *dnsStream) run() {
 	takes the src IP, dst IP, DNS question, DNS reply and the logs struct to populate.
 	returns nothing, but populates the logs array
 */
-func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.DNS, logs *[]dnsLogEntry) {
+func initLogEntry(
+	syslogPriority string,
+	srcIP net.IP,
+	srcPort string,
+	dstIP net.IP,
+	length *int,
+	protocol *string,
+	question layers.DNS,
+	reply layers.DNS,
+	inserted time.Time,
+	logs *[]dnsLogEntry) {
 
 	/*
 	   http://forums.devshed.com/dns-36/dns-packet-question-section-1-a-183026.html
@@ -130,23 +153,36 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 	   TODO: Also loop through Additional records in addition to Answers
 	*/
 
-	//a response code other than 0 means failure of some kind
+	if *protocol == "packet" {
+		*protocol = "udp"
+	}
 
+	// a response code other than 0 means failure of some kind
 	if reply.ResponseCode != 0 {
 
 		*logs = append(*logs, dnsLogEntry{
-			Query_ID:      reply.ID,
-			Question:      string(question.Questions[0].Name),
-			Response_Code: int(reply.ResponseCode),
-			Question_Type: TypeString(question.Questions[0].Type),
-			Answer:        reply.ResponseCode.String(),
-			Answer_Type:   "",
-			TTL:           0,
+			Level:                syslogPriority,
+			Query_ID:             reply.ID,
+			Question:             string(question.Questions[0].Name),
+			Response_Code:        int(reply.ResponseCode),
+			Question_Type:        TypeString(question.Questions[0].Type),
+			Answer:               reply.ResponseCode.String(),
+			Answer_Type:          "",
+			TTL:                  0,
+			Authoritative_Answer: reply.AA,
+			Recursion_Desired:    question.RD,
+			Recursion_Available:  question.RA,
+
 			//this is the answer packet, which comes from the server...
 			Server: srcIP,
 			//...and goes to the client
-			Client:    dstIP,
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Client:      dstIP,
+			Timestamp:   time.Now().UTC().String(),
+			Elapsed:     time.Now().Sub(inserted).Nanoseconds(),
+			Client_Port: srcPort,
+			Length:      *length,
+			Proto:       *protocol,
+			Truncated:   reply.TC,
 		})
 
 	} else {
@@ -163,46 +199,69 @@ func initLogEntry(srcIP net.IP, dstIP net.IP, question layers.DNS, reply layers.
 				//this is the answer packet, which comes from the server...
 				Server: srcIP,
 				//...and goes to the client
-				Client:    dstIP,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Client: dstIP,
+				//Timestamp:            time.Now().UTC().Format(time.RFC3339Nano),
+				Timestamp:            time.Now().UTC().String(),
+				Elapsed:              time.Now().Sub(inserted).Nanoseconds(),
+				Client_Port:          srcPort,
+				Level:                syslogPriority,
+				Authoritative_Answer: reply.AA,
+				Recursion_Desired:    question.RD,
+				Recursion_Available:  question.RA,
+				Length:               *length,
+				Proto:                *protocol,
+				Truncated:            reply.TC,
 			})
 		}
 	}
 }
 
-//background task to clear out stale entries in the conntable
-//one of these gets spun up for every packet handling thread
-//takes a pointer to the contable to clean, the maximum age of an entry and how often to run GC
-func cleanDnsCache(conntable *map[int64]dnsMapEntry, maxAge time.Duration,
-	interval time.Duration, threadNum int, stats *statsd.StatsdBuffer) {
+/*
+	background task to clear out stale entries in the conntable
+	takes a pointer to the conntable to clean, the maximum age of an entry and how often to run GC
+*/
+func cleanDnsCache(
+	conntable *connectionTable,
+	maxAge time.Duration,
+	interval time.Duration,
+	stats *statsd.StatsdBuffer) {
 
 	for {
 		time.Sleep(interval)
 
 		//max_age should be negative, e.g. -1m
 		cleanupCutoff := time.Now().Add(maxAge)
-		if stats != nil {
-			stats.Gauge(strconv.Itoa(threadNum)+".cache_size", int64(len(*conntable)))
-		}
-		for key, item := range *conntable {
+		conntable.RLock()
+		for key, item := range conntable.connections {
 			if item.inserted.Before(cleanupCutoff) {
-				log.Debug("conntable GC(" + strconv.Itoa(threadNum) + "): cleanup for unique combination " + strconv.FormatInt(key, 10))
-				delete(*conntable, key)
+				conntable.RUnlock()
+				conntable.Lock()
+				log.Debug("conntable GC: cleanup query ID " + key)
+				delete(conntable.connections, key)
+				conntable.Unlock()
+				conntable.RLock()
 				if stats != nil {
-					stats.Incr(strconv.Itoa(threadNum)+".cache_entries_dropped", 1)
+					stats.Incr("cache_entries_dropped", 1)
 				}
 			}
 		}
+		conntable.RUnlock()
 	}
 }
 
-func handleDns(conntable *map[int64]dnsMapEntry,
+func handleDns(
+	conntable *connectionTable,
 	dns *layers.DNS,
 	logC chan dnsLogEntry,
+	syslogPriority string,
 	srcIP net.IP,
+	srcPort string,
+	dstPort string,
 	dstIP net.IP,
-	srcPort int,
-	dstPort int) {
+	length *int,
+	protocol *string,
+	packetTime time.Time,
+	stats *statsd.StatsdBuffer) {
 	//skip non-query stuff (Updates, AXFRs, etc)
 	if dns.OpCode != layers.DNSOpCodeQuery {
 		log.Debug("Saw non-query DNS packet")
@@ -213,28 +272,16 @@ func handleDns(conntable *map[int64]dnsMapEntry,
 	//pre-allocated for initLogEntry
 	logs := []dnsLogEntry{}
 	// generate a more unique key for a conntable map to avoid hash key collisions as dns.ID is not very unique
-	var uid int64
-	if dstPort == 53 {
-		concat := strconv.Itoa(srcPort)
-		concat += strconv.Itoa(int(dns.ID))
-		var err error
-		uid, err = strconv.ParseInt(concat, 10, 64)
-		if err != nil {
-			log.Debug(fmt.Sprintf("Could not convert %s into int64", concat))
-		}
+	var uid string
+	if dstPort == "53" {
+		uid = fmt.Sprintf("%s->%s:%s", strconv.Itoa(int(dns.ID)), srcPort, dstPort)
 	} else {
-		concat := strconv.Itoa(dstPort)
-		concat += strconv.Itoa(int(dns.ID))
-		var err error
-		uid, err = strconv.ParseInt(concat, 10, 64)
-		if err != nil {
-			log.Debug(fmt.Sprintf("Could not convert %s into int64", concat))
-		}
+		uid = fmt.Sprintf("%s->%s:%s", strconv.Itoa(int(dns.ID)), dstPort, srcPort)
 	}
 
-	//lookup the query source port->dest port:query ID in our connection table
-	item, foundItem := (*conntable)[uid]
-
+	conntable.RLock()
+	//lookup the query ID:source port in our connection table
+	item, foundItem := conntable.connections[uid]
 	//this is a Query Response packet and we saw the question go out...
 	//if we saw a leg of this already...
 	if foundItem {
@@ -242,15 +289,17 @@ func handleDns(conntable *map[int64]dnsMapEntry,
 		logs = nil
 		//if we just got the reply
 		if dns.QR {
-			log.Debug(fmt.Printf("Got 'answer' leg of a combination of src port->dst port:query ID: %s", uid))
-			initLogEntry(srcIP, dstIP, item.entry, *dns, &logs)
+			log.Debug("Got 'answer' leg of query ID: " + strconv.Itoa(int(dns.ID)))
+			initLogEntry(syslogPriority, srcIP, srcPort, dstIP, length, protocol, item.entry, *dns, item.inserted, &logs)
 		} else {
 			//we just got the question, so we should already have the reply
-			log.Debug(fmt.Printf("Got the 'question' leg of a combination of src port->dst port:query ID: %s", uid))
-			initLogEntry(srcIP, dstIP, *dns, item.entry, &logs)
+			log.Debug("Got the 'question' leg of query ID " + strconv.Itoa(int(dns.ID)))
+			initLogEntry(syslogPriority, srcIP, srcPort, dstIP, length, protocol, *dns, item.entry, item.inserted, &logs)
 		}
-		delete(*conntable, uid)
-
+		conntable.RUnlock()
+		conntable.Lock()
+		delete(conntable.connections, uid)
+		conntable.Unlock()
 		//TODO: send the array itself, not the elements of the array
 		//to reduce the number of channel transactions
 		for _, logEntry := range logs {
@@ -262,10 +311,12 @@ func handleDns(conntable *map[int64]dnsMapEntry,
 		log.Debug("Got a leg of query ID " + strconv.Itoa(int(dns.ID)))
 		mapEntry := dnsMapEntry{
 			entry:    *dns,
-			inserted: time.Now(),
+			inserted: packetTime,
 		}
-		(*conntable)[uid] = mapEntry
-
+		conntable.RUnlock()
+		conntable.Lock()
+		conntable.connections[uid] = mapEntry
+		conntable.Unlock()
 	}
 }
 
@@ -274,15 +325,15 @@ func handleDns(conntable *map[int64]dnsMapEntry,
 
    we pass packet by value here because we turned on ZeroCopy for the capture, which reuses the capture buffer
 */
-func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
-	gcInterval time.Duration, gcAge time.Duration, threadNum int,
+func handlePacket(
+	conntable *connectionTable,
+	packets chan *packetData,
+	logC chan dnsLogEntry,
+	syslogPriority string,
+	gcInterval time.Duration,
+	gcAge time.Duration,
+	threadNum int,
 	stats *statsd.StatsdBuffer) {
-
-	//DNS IDs are stored as uint16s by the gopacket DNS layer
-	var conntable = make(map[int64]dnsMapEntry)
-
-	//setup garbage collection for this map
-	go cleanDnsCache(&conntable, gcAge, gcInterval, threadNum, stats)
 
 	//TCP reassembly init
 	streamFactory := &dnsStreamFactory{}
@@ -309,22 +360,60 @@ func handlePacket(packets chan *packetData, logC chan dnsLogEntry,
 			srcIP := packet.GetSrcIP()
 			dstIP := packet.GetDstIP()
 
+			var packetTime time.Time
+
+			if packet.GetTimestamp() != nil {
+				packetTime = *packet.GetTimestamp()
+			} else {
+				log.Debug("Adding wall time not packet time to message.")
+				if stats != nil {
+					stats.Incr(strconv.Itoa(threadNum)+".packet_wall_time", 1)
+				}
+				packetTime = time.Now()
+			}
+
 			//All TCP goes to reassemble.  This is first because a single packet DNS request will parse as DNS
 			//But that will leave the connection hanging around in memory, because the inital handshake won't
 			//parse as DNS, nor will the connection closing.
 
 			if packet.IsTCPStream() {
-				srcPort := 0
-				dstPort := 0
-				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP, srcPort, dstPort)
+				//TODO Make them real
+				srcPort := "0"
+				dstPort := "0"
+
+				handleDns(conntable,
+					packet.GetDNSLayer(),
+					logC,
+					syslogPriority,
+					srcIP,
+					srcPort,
+					dstPort,
+					dstIP,
+					packet.GetSize(),
+					packet.GetProto(),
+					packetTime,
+					stats)
 			} else if packet.HasTCPLayer() {
-				assembler.AssembleWithTimestamp(packet.GetIPLayer().NetworkFlow(),
+				assembler.AssembleWithTimestamp(
+					packet.GetIPLayer().NetworkFlow(),
 					packet.GetTCPLayer(), *packet.GetTimestamp())
 				continue
 			} else if packet.HasDNSLayer() {
-				srcPort := int(packet.udpLayer.DstPort)
-				dstPort := int(packet.udpLayer.SrcPort)
-				handleDns(&conntable, packet.GetDNSLayer(), logC, srcIP, dstIP, srcPort, dstPort)
+				// these are reversed because they are over the wire.
+				srcPort := strconv.Itoa(int(packet.udpLayer.DstPort))
+				dstPort := strconv.Itoa(int(packet.udpLayer.SrcPort))
+				handleDns(conntable,
+					packet.GetDNSLayer(),
+					logC,
+					syslogPriority,
+					srcIP,
+					srcPort,
+					dstPort,
+					dstIP,
+					packet.GetSize(),
+					packet.GetProto(),
+					packetTime,
+					stats)
 				if stats != nil {
 					stats.Incr(strconv.Itoa(threadNum)+".dns_lookups", 1)
 				}
@@ -346,18 +435,11 @@ func initHandle(config *pdnsConfig) *pcap.Handle {
 	var err error
 
 	if config.device != "" && !config.pfring {
-		handle, err = pcap.OpenLive(config.device, 65536, true, pcap.BlockForever)
+		handle, err = pcap.OpenLive(config.device, config.snapLen, true, pcap.BlockForever)
 		if err != nil {
 			log.Debug(err)
 			return nil
 		}
-		/*	} else if dev != "" && pfring {
-			handle, err = pfring.NewRing(dev, 65536, true, pfring.FlagPromisc)
-			if err != nil {
-				log.Debug(err)
-				return nil
-			}
-		*/
 	} else if config.pcapFile != "" {
 		handle, err = pcap.OpenOffline(config.pcapFile)
 		if err != nil {
@@ -375,18 +457,17 @@ func initHandle(config *pdnsConfig) *pcap.Handle {
 		return nil
 	}
 
-	/*	if dev != "" && pfring {
-			handle.Enable()
-		}
-	*/
-
 	return handle
 }
 
 //kick off packet procesing threads and start the packet capture loop
-func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
-	config *pdnsConfig, reChan chan tcpDataStruct,
-	stats *statsd.StatsdBuffer, done chan bool) {
+func doCapture(
+	handle *pcap.Handle,
+	logChan chan dnsLogEntry,
+	config *pdnsConfig,
+	reChan chan tcpDataStruct,
+	stats *statsd.StatsdBuffer,
+	done chan bool) {
 
 	gcAgeDur, err := time.ParseDuration(config.gcAge)
 
@@ -406,11 +487,21 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
 	for i := 0; i < config.numprocs; i++ {
-		channels = append(channels, make(chan *packetData, 500))
+		log.Debug("Creating packet processing channel %d", i)
+		channels = append(channels, make(chan *packetData, packetQueue))
 	}
 
+	//DNS IDs are stored as uint16s by the gopacket DNS layer
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+
+	//setup garbage collection for this map
+	go cleanDnsCache(&conntable, gcAgeDur, gcIntervalDur, stats)
+
 	for i := 0; i < config.numprocs; i++ {
-		go handlePacket(channels[i], logChan, gcIntervalDur, gcAgeDur, i, stats)
+		log.Debugf("Starting packet processing thread %d", i)
+		go handlePacket(&conntable, channels[i], logChan, config.syslogPriority, gcIntervalDur, gcAgeDur, i, stats)
 	}
 
 	// Use the handle as a packet source to process all packets
@@ -441,6 +532,7 @@ func doCapture(handle *pcap.Handle, logChan chan dnsLogEntry,
 	)
 
 	foundLayerTypes := []gopacket.LayerType{}
+	scheduled := time.NewTicker(time.Duration(config.statsdInterval) * time.Second)
 
 CAPTURE:
 	for {
@@ -470,8 +562,25 @@ CAPTURE:
 				log.Debug("packetSource returned nil.")
 				break CAPTURE
 			}
+		case <-scheduled.C:
+			handleStats, err := handle.Stats()
+
+			if err != nil {
+				continue
+			}
+
+			log.Printf("Statistics received: %d, dropped: %d, interface dropped %d",
+				handleStats.PacketsReceived,
+				handleStats.PacketsDropped,
+				handleStats.PacketsIfDropped,
+			)
+			if stats != nil {
+				stats.Incr("packets_received", int64(handleStats.PacketsReceived))
+				stats.Incr("packets_dropped", int64(handleStats.PacketsDropped))
+				stats.Incr("packets_ifdropped", int64(handleStats.PacketsIfDropped))
+			}
 		case <-done:
-			log.Printf("%s: doCapture cleanly exiting.", config.sensorName)
+			log.Printf("gopassivedns: doCapture cleanly exiting.")
 			break CAPTURE
 		}
 	}
@@ -480,7 +589,9 @@ CAPTURE:
 
 //If we shut down without doing this stuff, we will lose some of the packet data
 //still in the processing pipeline.
-func gracefulShutdown(channels []chan *packetData, reChan chan tcpDataStruct, logChan chan dnsLogEntry) {
+func gracefulShutdown(channels []chan *packetData,
+	reChan chan tcpDataStruct,
+	logChan chan dnsLogEntry) {
 
 	var wait_time int = 6
 	var numprocs int = len(channels)
@@ -493,7 +604,7 @@ OUTER:
 		case reassembledTcp := <-reChan:
 			pd := NewTcpData(reassembledTcp)
 			channels[int(reassembledTcp.IpLayer.FastHash())&(numprocs-1)] <- pd
-		case <-time.After(3 * time.Second):
+		case <-time.After(6 * time.Second):
 			break OUTER
 		}
 	}
@@ -524,7 +635,7 @@ func watchSignals(sig chan os.Signal, done chan bool) {
 			log.Println("Caught signal about to cleanly exit.")
 			done <- true
 			// Sleeping 15 seconds while the gracefulshutdown function completes.
-			time.Sleep(time.Duration(15) * time.Second)
+			time.Sleep(15 * time.Second)
 			return
 		}
 	}
@@ -542,14 +653,18 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		pprof.StartCPUProfile(f)
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatal("Could not start CPU Profile ", err)
+		}
+
+		defer f.Close()
 		defer pprof.StopCPUProfile()
 	}
 
 	var stats *statsd.StatsdBuffer = nil
 
 	if config.statsdHost != "" {
-		statsdclient := statsd.NewStatsdClient(config.statsdHost, config.statsdPrefix+"."+config.sensorName+".")
+		statsdclient := statsd.NewStatsdClient(config.statsdHost, fmt.Sprintf("%s.%s.", config.statsdPrefix, config.sensorName))
 		err := statsdclient.CreateSocket()
 		if err != nil {
 			log.Println(err)
@@ -566,7 +681,7 @@ func main() {
 
 	logOpts := NewLogOptions(config)
 
-	logChan := initLogging(logOpts)
+	logChan := initLogging(logOpts, config)
 
 	reChan := make(chan tcpDataStruct)
 

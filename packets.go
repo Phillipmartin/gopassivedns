@@ -2,10 +2,11 @@ package main
 
 import (
 	"errors"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"net"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 /*
@@ -139,4 +140,20 @@ func (pd *packetData) GetTimestamp() *time.Time {
 	} else {
 		return nil
 	}
+}
+
+func (pd *packetData) GetSize() *int {
+	if pd.datatype == "packet" {
+		return &pd.packet.Metadata().Length
+	} else {
+		// This needs to be improved. Currently because GetSize only works with UDP
+		// that is because we can't measure the size of the entire re-assembled stream
+		// of TCP right now. Fix pending.
+		sz := int(0)
+		return &sz
+	}
+}
+
+func (pd *packetData) GetProto() *string {
+	return &pd.datatype
 }

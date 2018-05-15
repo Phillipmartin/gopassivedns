@@ -2,16 +2,17 @@ package main
 
 import (
 	"flag"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
-	"github.com/quipo/statsd"
 	"log/syslog"
 	"net"
 	"os"
 	"os/user"
 	"testing"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"github.com/quipo/statsd"
 )
 
 var stats *statsd.StatsdBuffer = nil
@@ -91,25 +92,35 @@ Benchmarking functions
 
 func BenchmarkALogEntry(b *testing.B) {
 	var srcIP net.IP = net.ParseIP("1.1.1.1")
+	var srcPort string = "53100"
 	var dstIP net.IP = net.ParseIP("2.2.2.2")
+	var syslogPriority string = "DEBUG"
+	var logProtocol string = "TCP"
+	var length int = 141
+
 	DNSlayers := getDNSLayers("a")
 	logs := []dnsLogEntry{}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		logs = nil
-		initLogEntry(srcIP, dstIP, *DNSlayers[0], *DNSlayers[1], &logs)
+		initLogEntry(syslogPriority, srcIP, srcPort, dstIP, &length, &logProtocol, *DNSlayers[0], *DNSlayers[1], time.Now(), &logs)
 	}
 }
 
 func BenchmarkLogMarshal(b *testing.B) {
 	var srcIP net.IP = net.ParseIP("1.1.1.1")
+	var srcPort string = "53100"
 	var dstIP net.IP = net.ParseIP("2.2.2.2")
+	var syslogPriority string = "DEBUG"
+	var logProtocol string = "TCP"
+	var length int = 141
+
 	DNSlayers := getDNSLayers("a")
 	logs := []dnsLogEntry{}
 
 	logs = nil
-	initLogEntry(srcIP, dstIP, *DNSlayers[0], *DNSlayers[1], &logs)
+	initLogEntry(syslogPriority, srcIP, srcPort, dstIP, &length, &logProtocol, *DNSlayers[0], *DNSlayers[1], time.Now(), &logs)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -175,6 +186,7 @@ func BenchmarkHandleUDPPackets(b *testing.B) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
 
+	var syslogPriority string = "DEBUG"
 	var logChan = make(chan dnsLogEntry)
 
 	go func() {
@@ -197,7 +209,10 @@ func BenchmarkHandleUDPPackets(b *testing.B) {
 
 		//print(".")
 		b.StartTimer()
-		handlePacket(packetChan, logChan, gcInterval, gcAge, 1, stats)
+		var conntable = connectionTable{
+			connections: make(map[string]dnsMapEntry),
+		}
+		handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, stats)
 	}
 
 }
@@ -319,6 +334,14 @@ func TestDefaultConfig(t *testing.T) {
 		t.Fatal("")
 	}
 
+	if config.fluentdSocket != "" {
+		t.Fatal("")
+	}
+
+	if config.snapLen != 4096 {
+		t.Fatal("")
+	}
+
 	os.Unsetenv("PDNS_DEV")
 	os.Unsetenv("PDNS_KAFKA_PEERS")
 	os.Unsetenv("PDNS_KAFKA_TOPIC")
@@ -346,10 +369,15 @@ func TestParseA(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
 
+	var syslogPriority string = "DEBUG"
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	//Consume load
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, stats)
 
 	packetSource := getPacketData("a")
 	packetSource.DecodeOptions.Lazy = true
@@ -418,10 +446,13 @@ func TestParseAAAA(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
 
+	var syslogPriority string = "DEBUG"
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
-
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("aaaa")
 	packetSource.DecodeOptions.Lazy = true
@@ -490,10 +521,13 @@ func TestParseNS(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
 
+	var syslogPriority string = "DEBUG"
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
-
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("ns")
 	packetSource.DecodeOptions.Lazy = true
@@ -561,10 +595,14 @@ func TestParseMX(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
 
+	var syslogPriority string = "DEBUG"
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
@@ -632,10 +670,14 @@ func TestParseNXDOMAIN(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-1m")
 	gcInterval, _ := time.ParseDuration("3m")
 
+	var syslogPriority string = "DEBUG"
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("nxdomain")
 	packetSource.DecodeOptions.Lazy = true
@@ -703,8 +745,12 @@ func TestParseMultipleUDPPackets(t *testing.T) {
 	//so strange.
 	var packetChan = make(chan *packetData, 6)
 	var logChan = make(chan dnsLogEntry)
+	var syslogPriority string = "DEBUG"
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, nil)
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, nil)
 
 	packetSource := getPacketData("multiple_udp")
 	packetSource.DecodeOptions.Lazy = true
@@ -765,7 +811,7 @@ func TestDoCaptureUDP(t *testing.T) {
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, &pdnsConfig{gcAge: "-1m", gcInterval: "3m", numprocs: 8}, reChan, stats, done)
+	doCapture(handle, logChan, &pdnsConfig{gcAge: "-1m", gcInterval: "3m", numprocs: 8, statsdInterval: 3}, reChan, stats, done)
 
 	logs := ToSlice(logStash)
 
@@ -785,7 +831,7 @@ func TestDoCaptureTCP(t *testing.T) {
 
 	go LogMirrorBg(logChan, logStash)
 
-	doCapture(handle, logChan, &pdnsConfig{gcAge: "-1m", gcInterval: "3m", numprocs: 8}, reChan, stats, done)
+	doCapture(handle, logChan, &pdnsConfig{gcAge: "-1m", gcInterval: "3m", numprocs: 8, statsdInterval: 3}, reChan, stats, done)
 
 	logs := ToSlice(logStash)
 
@@ -835,10 +881,15 @@ func TestConntableGC(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-5s")
 	gcInterval, _ := time.ParseDuration("5s")
 
+	var syslogPriority string = "DEBUG"
 	var packetChan = make(chan *packetData)
 	var logChan = make(chan dnsLogEntry)
 
-	go handlePacket(packetChan, logChan, gcInterval, gcAge, 1, stats)
+	var conntable = connectionTable{
+		connections: make(map[string]dnsMapEntry),
+	}
+	go cleanDnsCache(&conntable, gcAge, gcInterval, stats)
+	go handlePacket(&conntable, packetChan, logChan, syslogPriority, gcInterval, gcAge, 1, stats)
 
 	packetSource := getPacketData("mx")
 	packetSource.DecodeOptions.Lazy = true
