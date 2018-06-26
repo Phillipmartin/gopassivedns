@@ -61,9 +61,12 @@ You have 3 choices: deploy it on your resolver(s) or deploy it on your gateway(s
 Right now, I'd recommend using logstash to ship the logs to an elasticsearch cluster.  All the logs are JSON, so this should be pretty easy.  I would also suggest using something like HDFS for long term storage and bulk analysis.  DNS queries are an amazing source of internal data!
 
 ## Build and install
+
+Requires **Glide** to manage the vendored dependencies. The glide update command in the following list will download and install the dependencies with the correct versions into the vendor folder to ensure a safe compile.
+
    * clone this repo
    * install libpcap, libpcap-dev
-   * 'go get'
-   * 'go build -o gopassivedns'  (the -o is really just being careful, assuming you cloned the repo you shouldn't need it)
-   * 'cp gopassivedns /some/path/to/gopassivedns'
+   * ```glide update```
+   * ```go build -o gopassivedns```  (the -o is really just being careful, assuming you cloned the repo you shouldn't need it)
+   * ```cp gopassivedns /some/path/to/gopassivedns```
 
