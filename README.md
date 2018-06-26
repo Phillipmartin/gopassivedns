@@ -62,7 +62,7 @@ Right now, I'd recommend using logstash to ship the logs to an elasticsearch clu
 
 ## Build and install
 
-Requires **Glide** to manage the vendored dependencies. The glide update command in the following list will download and install the dependencies with the correct versions into the vendor folder to ensure a safe compile.
+Requires **[Glide](https://github.com/Masterminds/glide)** to manage the vendored dependencies. The glide update command in the following list will download and install the dependencies with the correct versions into the vendor folder to ensure a safe compile.
 
    * clone this repo
    * install libpcap, libpcap-dev
