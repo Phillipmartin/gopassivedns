@@ -1,0 +1,57 @@
+hash: bc1c9a755ae178cb5877fa4df65b62ade75e0d55989ec2410e7b0d316891511b
+updated: 2018-06-27T09:34:28.866396+10:00
+imports:
+- name: github.com/golang/protobuf
+  version: 9eb2c01ac278a5d89ce4b2be68fe4500955d8179
+  subpackages:
+  - proto
+- name: github.com/google/gopacket
+  version: 11c65f1ca9081dfea43b4f9643f5c155583b73ba
+  subpackages:
+  - layers
+  - pcap
+  - tcpassembly
+  - tcpassembly/tcpreader
+- name: github.com/pquerna/ffjson
+  version: d49c2bc1aa135aad0c6f4fc2056623ec78f5d5ac
+  subpackages:
+  - ffjson
+  - fflib/v1
+  - fflib/v1/internal
+- name: github.com/quipo/statsd
+  version: 977fadbd5cda9975ab87279994ea2029efdbd436
+  subpackages:
+  - event
+- name: github.com/Sirupsen/logrus
+  version: c155da19408a8799da419ed3eeb0cb5db0ad5dbc
+- name: github.com/vmihailenco/msgpack
+  version: b5e691b1eb52a28c05e67ab9df303626c095c23b
+  subpackages:
+  - codes
+- name: golang.org/x/crypto
+  version: a49355c7e3f8fe157a85be2f77e6e269a0f89602
+  subpackages:
+  - ssh/terminal
+- name: golang.org/x/net
+  version: afe8f62b1d6bbd81f31868121a50b06d8188e1f9
+  subpackages:
+  - context
+- name: golang.org/x/sys
+  version: c4afb3effaa53fd9a06ca61262dc7ce8df4c081b
+  subpackages:
+  - unix
+  - windows
+- name: google.golang.org/appengine
+  version: b1f26356af11148e710935ed1ac8a7f5702c7612
+  subpackages:
+  - datastore
+  - internal
+  - internal/app_identity
+  - internal/base
+  - internal/datastore
+  - internal/log
+  - internal/modules
+  - internal/remote_api
+- name: gopkg.in/natefinch/lumberjack.v2
+  version: a96e63847dc3c67d17befa69c303767e2f84e54f
+testImports: []

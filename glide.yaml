@@ -1,0 +1,20 @@
+package: github.com/Phillipmartin/gopassivedns
+import:
+- package: github.com/Sirupsen/logrus
+  version: ~1.0.5
+- package: github.com/google/gopacket
+  version: ~1.1.14
+  subpackages:
+  - layers
+  - pcap
+  - tcpassembly
+  - tcpassembly/tcpreader
+- package: github.com/pquerna/ffjson
+  subpackages:
+  - ffjson
+- package: github.com/quipo/statsd
+  version: ~1.4.0
+- package: github.com/vmihailenco/msgpack
+  version: ~3.3.3
+- package: gopkg.in/natefinch/lumberjack.v2
+  version: ~2.1.0
