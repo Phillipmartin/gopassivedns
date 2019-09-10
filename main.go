@@ -160,34 +160,37 @@ func initLogEntry(
 	// a response code other than 0 means failure of some kind
 	if reply.ResponseCode != 0 {
 		// TODO: This isn't working with IPv6? Disabling it for now
-		// *logs = append(*logs, dnsLogEntry{
-		// 	Level:                syslogPriority,
-		// 	Query_ID:             reply.ID,
-		// 	Question:             string(question.Questions[0].Name),
-		// 	Response_Code:        int(reply.ResponseCode),
-		// 	Question_Type:        TypeString(question.Questions[0].Type),
-		// 	Answer:               reply.ResponseCode.String(),
-		// 	Answer_Type:          "",
-		// 	TTL:                  0,
-		// 	Authoritative_Answer: reply.AA,
-		// 	Recursion_Desired:    question.RD,
-		// 	Recursion_Available:  question.RA,
+		if len(question.Questions) != 0{
+	
+		*logs = append(*logs, dnsLogEntry{
+			Level:                syslogPriority,
+			Query_ID:             reply.ID,
+			Question:             string(question.Questions[0].Name),
+			Response_Code:        int(reply.ResponseCode),
+			Question_Type:        TypeString(question.Questions[0].Type),
+			Answer:               reply.ResponseCode.String(),
+			Answer_Type:          "",
+			TTL:                  0,
+			Authoritative_Answer: reply.AA,
+			Recursion_Desired:    question.RD,
+			Recursion_Available:  question.RA,
 
-		// 	//this is the answer packet, which comes from the server...
-		// 	Server: srcIP,
-		// 	//...and goes to the client
-		// 	Client:      dstIP,
-		// 	Timestamp:   time.Now().UTC().String(),
-		// 	Elapsed:     time.Now().Sub(inserted).Nanoseconds(),
-		// 	Client_Port: srcPort,
-		// 	Length:      *length,
-		// 	Proto:       *protocol,
-		// 	Truncated:   reply.TC,
-		// })
+			//this is the answer packet, which comes from the server...
+			Server: srcIP,
+			//...and goes to the client
+			Client:      dstIP,
+			Timestamp:   time.Now().UTC().String(),
+			Elapsed:     time.Now().Sub(inserted).Nanoseconds(),
+			Client_Port: srcPort,
+			Length:      *length,
+			Proto:       *protocol,
+			Truncated:   reply.TC,
+		})
+		}
 
 	} else {
 		for _, answer := range reply.Answers {
-
+			if len(question.Questions) != 0{
 			*logs = append(*logs, dnsLogEntry{
 				Query_ID:      reply.ID,
 				Question:      string(question.Questions[0].Name),
@@ -212,6 +215,7 @@ func initLogEntry(
 				Proto:                *protocol,
 				Truncated:            reply.TC,
 			})
+			}
 		}
 	}
 }
