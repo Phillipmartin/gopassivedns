@@ -22,12 +22,13 @@ type packetData struct {
 
 	foundLayerTypes []gopacket.LayerType
 
-	ethLayer *layers.Ethernet
-	ipLayer  *layers.IPv4
-	udpLayer *layers.UDP
-	tcpLayer *layers.TCP
-	dns      *layers.DNS
-	payload  *gopacket.Payload
+	ethLayer  *layers.Ethernet
+	vlanLayer *layers.Dot1Q
+	ipLayer   *layers.IPv4
+	udpLayer  *layers.UDP
+	tcpLayer  *layers.TCP
+	dns       *layers.DNS
+	payload   *gopacket.Payload
 }
 
 // codebeat:enable[TOO_MANY_IVARS]
@@ -62,6 +63,7 @@ func (pd *packetData) Parse() error {
 
 		return nil
 	} else if pd.datatype == "packet" {
+		pd.vlanLayer = &layers.Dot1Q{}
 		pd.ethLayer = &layers.Ethernet{}
 		pd.ipLayer = &layers.IPv4{}
 		pd.udpLayer = &layers.UDP{}
@@ -73,13 +75,13 @@ func (pd *packetData) Parse() error {
 		parser := gopacket.NewDecodingLayerParser(
 			layers.LayerTypeEthernet,
 			pd.ethLayer,
+			pd.vlanLayer,
 			pd.ipLayer,
 			pd.udpLayer,
 			pd.tcpLayer,
 			pd.dns,
 			pd.payload,
 		)
-
 		parser.DecodeLayers(pd.packet.Data(), &pd.foundLayerTypes)
 
 		return nil

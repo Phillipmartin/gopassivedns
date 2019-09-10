@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
 	"github.com/quipo/statsd"
-	log "github.com/Sirupsen/logrus"
 )
 
 /*
@@ -159,31 +159,31 @@ func initLogEntry(
 
 	// a response code other than 0 means failure of some kind
 	if reply.ResponseCode != 0 {
+		// TODO: This isn't working with IPv6? Disabling it for now
+		// *logs = append(*logs, dnsLogEntry{
+		// 	Level:                syslogPriority,
+		// 	Query_ID:             reply.ID,
+		// 	Question:             string(question.Questions[0].Name),
+		// 	Response_Code:        int(reply.ResponseCode),
+		// 	Question_Type:        TypeString(question.Questions[0].Type),
+		// 	Answer:               reply.ResponseCode.String(),
+		// 	Answer_Type:          "",
+		// 	TTL:                  0,
+		// 	Authoritative_Answer: reply.AA,
+		// 	Recursion_Desired:    question.RD,
+		// 	Recursion_Available:  question.RA,
 
-		*logs = append(*logs, dnsLogEntry{
-			Level:                syslogPriority,
-			Query_ID:             reply.ID,
-			Question:             string(question.Questions[0].Name),
-			Response_Code:        int(reply.ResponseCode),
-			Question_Type:        TypeString(question.Questions[0].Type),
-			Answer:               reply.ResponseCode.String(),
-			Answer_Type:          "",
-			TTL:                  0,
-			Authoritative_Answer: reply.AA,
-			Recursion_Desired:    question.RD,
-			Recursion_Available:  question.RA,
-
-			//this is the answer packet, which comes from the server...
-			Server: srcIP,
-			//...and goes to the client
-			Client:      dstIP,
-			Timestamp:   time.Now().UTC().String(),
-			Elapsed:     time.Now().Sub(inserted).Nanoseconds(),
-			Client_Port: srcPort,
-			Length:      *length,
-			Proto:       *protocol,
-			Truncated:   reply.TC,
-		})
+		// 	//this is the answer packet, which comes from the server...
+		// 	Server: srcIP,
+		// 	//...and goes to the client
+		// 	Client:      dstIP,
+		// 	Timestamp:   time.Now().UTC().String(),
+		// 	Elapsed:     time.Now().Sub(inserted).Nanoseconds(),
+		// 	Client_Port: srcPort,
+		// 	Length:      *length,
+		// 	Proto:       *protocol,
+		// 	Truncated:   reply.TC,
+		// })
 
 	} else {
 		for _, answer := range reply.Answers {
@@ -344,12 +344,10 @@ func handlePacket(
 	for {
 		select {
 		case packet, more := <-packets:
-
 			//used for clean shutdowns
 			if !more {
 				return
 			}
-
 			err := packet.Parse()
 
 			if err != nil {
@@ -487,7 +485,7 @@ func doCapture(
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
 	for i := 0; i < config.numprocs; i++ {
-		log.Debug("Creating packet processing channel %d", i)
+		log.Debugf("Creating packet processing channel %d", i)
 		channels = append(channels, make(chan *packetData, packetQueue))
 	}
 
@@ -523,10 +521,12 @@ func doCapture(
 	*/
 
 	var ethLayer layers.Ethernet
+	var vlanLayer layers.Dot1Q
 	var ipLayer layers.IPv4
 
 	parser := gopacket.NewDecodingLayerParser(
 		layers.LayerTypeEthernet,
+		&vlanLayer,
 		&ethLayer,
 		&ipLayer,
 	)
