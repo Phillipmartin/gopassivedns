@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	// "context"
 	"fmt"
 
 	"log/syslog"
@@ -12,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shopify/sarama"
 	log "github.com/Sirupsen/logrus"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/quipo/statsd"
-	// "github.com/segmentio/kafka-go"
 	"github.com/vmihailenco/msgpack"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -180,7 +179,16 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		// 	Topic:    opts.KafkaTopic,
 		// 	Balancer: &kafka.LeastBytes{},
 		// })
-		go logConnKafka(kafkaChan, opts)
+		// defer writer.Close()
+		config := sarama.NewConfig()
+		config.Producer.RequiredAcks = 0
+		config.Producer.Flush.Frequency = 500 * time.Millisecond
+		producer, err := sarama.NewAsyncProducer(strings.Split(opts.KafkaBrokers, ","), config)
+		if err != nil {
+			log.Fatalln("Failed to start Sarama producer:", err)
+		}
+		topic := opts.KafkaTopic
+		go logConnKafka(kafkaChan, producer, topic, opts)
 	}
 
 	if opts.LogToSyslog() {
@@ -245,16 +253,22 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 }
 
 //logs to kafka
-func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
-	// for message := range logC {
-		// encoded, _ := message.Encode()
+func logConnKafka(logC chan dnsLogEntry, producer sarama.AsyncProducer, topic string, opts *logOptions) {
+	for message := range logC {
+		encoded, _ := message.Encode()
+		msg := &sarama.ProducerMessage{
+			Topic: topic,
+			Value: sarama.StringEncoder(encoded),
+		}
+		producer.Input() <- msg
+
 		// writer.WriteMessages(context.Background(),
 		// 	kafka.Message{
 		// 		Value: []byte(encoded),
 		// 	})
 		// 		fmt.Println("Kafka: " + string(encoded))
-			
-	// }
+
+	}
 }
 
 //logs to syslog
