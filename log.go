@@ -173,7 +173,12 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		log.Debug("kafka logging enabled")
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
-		go logConnKafka(kafkaChan, opts)
+		writer := kafka.NewWriter(kafka.WriterConfig{
+		Brokers: opts.KafkaBrokers,
+		Topic:   opts.KafkaTopic,
+		Balancer: &kafka.LeastBytes{},
+		})
+		go logConnKafka(kafkaChan, opts, writer)
 	}
 
 	if opts.LogToSyslog() {
@@ -238,9 +243,13 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 }
 
 //logs to kafka
-func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
+func logConnKafka(logC chan dnsLogEntry, opts *logOptions, writer) {
 	for message := range logC {
 		encoded, _ := message.Encode()
+		writer.WriteMessages(context.Background(),
+		kafka.Message{
+			Value: []byte(encoded),
+		},)
 // 		fmt.Println("Kafka: " + string(encoded))
 
 	}
