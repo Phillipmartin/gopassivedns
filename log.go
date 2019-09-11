@@ -241,7 +241,7 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
 	for message := range logC {
 		encoded, _ := message.Encode()
-		fmt.Println("Kafka: " + string(encoded))
+// 		fmt.Println("Kafka: " + string(encoded))
 
 	}
 }
