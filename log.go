@@ -15,6 +15,7 @@ import (
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/quipo/statsd"
 	"github.com/vmihailenco/msgpack"
+	"github.com/segmentio/kafka-go"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
