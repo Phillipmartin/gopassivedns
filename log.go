@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 
 	"log/syslog"
@@ -14,8 +15,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/quipo/statsd"
-	"github.com/vmihailenco/msgpack"
 	"github.com/segmentio/kafka-go"
+	"github.com/vmihailenco/msgpack"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -175,11 +176,11 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
 		writer := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: opts.KafkaBrokers,
-		Topic:   opts.KafkaTopic,
-		Balancer: &kafka.LeastBytes{},
+			Brokers:  strings.Split(opts.KafkaBrokers, ","),
+			Topic:    opts.KafkaTopic,
+			Balancer: &kafka.LeastBytes{},
 		})
-		go logConnKafka(kafkaChan, opts, writer)
+		go logConnKafka(kafkaChan, writer, opts)
 	}
 
 	if opts.LogToSyslog() {
@@ -244,14 +245,14 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 }
 
 //logs to kafka
-func logConnKafka(logC chan dnsLogEntry, opts *logOptions, writer) {
+func logConnKafka(logC chan dnsLogEntry, writer *kafka.Writer, opts *logOptions) {
 	for message := range logC {
 		encoded, _ := message.Encode()
 		writer.WriteMessages(context.Background(),
-		kafka.Message{
-			Value: []byte(encoded),
-		},)
-// 		fmt.Println("Kafka: " + string(encoded))
+			kafka.Message{
+				Value: []byte(encoded),
+			})
+		// 		fmt.Println("Kafka: " + string(encoded))
 
 	}
 }
