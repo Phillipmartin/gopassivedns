@@ -182,11 +182,13 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		// defer writer.Close()
 		config := sarama.NewConfig()
 		config.Producer.RequiredAcks = 0
-		config.Producer.Flush.Frequency = 5000 * time.Millisecond
+		// config.Producer.Flush.Frequency = 5000 * time.Millisecond
+		config.Producer.Flush.MaxMessages = 1000
 		producer, err := sarama.NewAsyncProducer(strings.Split(opts.KafkaBrokers, ","), config)
 		if err != nil {
 			log.Fatalln("Failed to start Sarama producer:", err)
 		}
+		defer producer.Close()
 		topic := opts.KafkaTopic
 		go logConnKafka(kafkaChan, producer, topic, opts)
 	}
