@@ -182,7 +182,7 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		// defer writer.Close()
 		config := sarama.NewConfig()
 		config.Producer.RequiredAcks = 0
-		config.Producer.Flush.Frequency = 500 * time.Millisecond
+		config.Producer.Flush.Frequency = 5000 * time.Millisecond
 		producer, err := sarama.NewAsyncProducer(strings.Split(opts.KafkaBrokers, ","), config)
 		if err != nil {
 			log.Fatalln("Failed to start Sarama producer:", err)
