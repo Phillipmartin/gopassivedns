@@ -30,6 +30,7 @@ type logOptions struct {
 	MaxSize        int
 	KafkaBrokers   string
 	KafkaTopic     string
+	kafkaFlushFreq int
 	SyslogFacility string
 	SyslogPriority string
 	SensorName     string
@@ -44,6 +45,7 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		Filename:       config.logFile,
 		FluentdSocket:  config.fluentdSocket,
 		KafkaBrokers:   config.kafkaBrokers,
+		kafkaFlushFreq: config.kafkaFlushFreq,
 		KafkaTopic:     config.kafkaTopic,
 		MaxAge:         config.logMaxAge,
 		MaxSize:        config.logMaxSize,
@@ -174,16 +176,9 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		log.Debug("kafka logging enabled")
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
-		// writer := kafka.NewWriter(kafka.WriterConfig{
-		// 	Brokers:  strings.Split(opts.KafkaBrokers, ","),
-		// 	Topic:    opts.KafkaTopic,
-		// 	Balancer: &kafka.LeastBytes{},
-		// })
-		// defer writer.Close()
 		config := sarama.NewConfig()
 		config.Producer.RequiredAcks = 0
-		// config.Producer.Flush.Frequency = 5000 * time.Millisecond
-		config.Producer.Flush.MaxMessages = 1000
+		config.Producer.Flush.MaxMessages = opts.kafkaFlushFreq
 		producer, err := sarama.NewAsyncProducer(strings.Split(opts.KafkaBrokers, ","), config)
 		if err != nil {
 			log.Fatalln("Failed to start Sarama producer:", err)

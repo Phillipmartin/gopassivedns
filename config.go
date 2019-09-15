@@ -25,6 +25,7 @@ type pdnsConfig struct {
 
 	kafkaBrokers   string
 	kafkaTopic     string
+	kafkaFlushFreq int
 	logFile        string
 	logMaxAge      int
 	logMaxSize     int
@@ -44,6 +45,7 @@ func initConfig() *pdnsConfig {
 	var dev = flag.String("dev", getEnvStr("PDNS_DEV", ""), "Capture Device")
 	var kafkaBrokers = flag.String("kafka_brokers", getEnvStr("PDNS_KAFKA_PEERS", ""), "The Kafka brokers to connect to, as a comma separated list")
 	var kafkaTopic = flag.String("kafka_topic", getEnvStr("PDNS_KAFKA_TOPIC", ""), "Kafka topic for output")
+	var kafkaFlushFreq = flag.Int("kafka_flush_freq", getEnvInt("PDNS_KAFKA_FLUSH_FREQ", 1000), "Kafka Flush frequency")
 	var bpf = flag.String("bpf", getEnvStr("PDNS_BPF", "port 53"), "BPF Filter") //default port 53
 	var pcapFile = flag.String("pcap", getEnvStr("PDNS_PCAP_FILE", ""), "pcap file")
 	var logFile = flag.String("logfile", getEnvStr("PDNS_LOG_FILE", ""), "log file (recommended for debug only")
@@ -101,6 +103,7 @@ func initConfig() *pdnsConfig {
 
 			kafkaBrokers:   *kafkaBrokers,
 			kafkaTopic:     *kafkaTopic,
+			kafkaFlushFreq: *kafkaFlushFreq,
 			logFile:        *logFile,
 			logMaxAge:      *logMaxAge,
 			logMaxSize:     *logMaxSize,
