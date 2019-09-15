@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
 	"github.com/quipo/statsd"
-	log "github.com/Sirupsen/logrus"
 )
 
 /*
@@ -159,7 +159,9 @@ func initLogEntry(
 
 	// a response code other than 0 means failure of some kind
 	if reply.ResponseCode != 0 {
-
+		// TODO: This isn't working with IPv6? Disabling it for now
+		if len(question.Questions) != 0{
+	
 		*logs = append(*logs, dnsLogEntry{
 			Level:                syslogPriority,
 			Query_ID:             reply.ID,
@@ -184,10 +186,11 @@ func initLogEntry(
 			Proto:       *protocol,
 			Truncated:   reply.TC,
 		})
+		}
 
 	} else {
 		for _, answer := range reply.Answers {
-
+			if len(question.Questions) != 0{
 			*logs = append(*logs, dnsLogEntry{
 				Query_ID:      reply.ID,
 				Question:      string(question.Questions[0].Name),
@@ -212,6 +215,7 @@ func initLogEntry(
 				Proto:                *protocol,
 				Truncated:            reply.TC,
 			})
+			}
 		}
 	}
 }
@@ -344,12 +348,10 @@ func handlePacket(
 	for {
 		select {
 		case packet, more := <-packets:
-
 			//used for clean shutdowns
 			if !more {
 				return
 			}
-
 			err := packet.Parse()
 
 			if err != nil {
@@ -487,7 +489,7 @@ func doCapture(
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
 	for i := 0; i < config.numprocs; i++ {
-		log.Debug("Creating packet processing channel %d", i)
+		log.Debugf("Creating packet processing channel %d", i)
 		channels = append(channels, make(chan *packetData, packetQueue))
 	}
 
@@ -523,10 +525,12 @@ func doCapture(
 	*/
 
 	var ethLayer layers.Ethernet
+	var vlanLayer layers.Dot1Q
 	var ipLayer layers.IPv4
 
 	parser := gopacket.NewDecodingLayerParser(
 		layers.LayerTypeEthernet,
+		&vlanLayer,
 		&ethLayer,
 		&ipLayer,
 	)

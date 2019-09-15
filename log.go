@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shopify/sarama"
 	log "github.com/Sirupsen/logrus"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/quipo/statsd"
@@ -29,6 +30,7 @@ type logOptions struct {
 	MaxSize        int
 	KafkaBrokers   string
 	KafkaTopic     string
+	kafkaFlushFreq int
 	SyslogFacility string
 	SyslogPriority string
 	SensorName     string
@@ -43,6 +45,7 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		Filename:       config.logFile,
 		FluentdSocket:  config.fluentdSocket,
 		KafkaBrokers:   config.kafkaBrokers,
+		kafkaFlushFreq: config.kafkaFlushFreq,
 		KafkaTopic:     config.kafkaTopic,
 		MaxAge:         config.logMaxAge,
 		MaxSize:        config.logMaxSize,
@@ -173,7 +176,16 @@ func logConn(logC chan dnsLogEntry, opts *logOptions, stats *statsd.StatsdBuffer
 		log.Debug("kafka logging enabled")
 		kafkaChan := make(chan dnsLogEntry)
 		logs = append(logs, kafkaChan)
-		go logConnKafka(kafkaChan, opts)
+		config := sarama.NewConfig()
+		config.Producer.RequiredAcks = 0
+		config.Producer.Flush.MaxMessages = opts.kafkaFlushFreq
+		producer, err := sarama.NewAsyncProducer(strings.Split(opts.KafkaBrokers, ","), config)
+		if err != nil {
+			log.Fatalln("Failed to start Sarama producer:", err)
+		}
+		defer producer.Close()
+		topic := opts.KafkaTopic
+		go logConnKafka(kafkaChan, producer, topic, opts)
 	}
 
 	if opts.LogToSyslog() {
@@ -238,10 +250,20 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 }
 
 //logs to kafka
-func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
+func logConnKafka(logC chan dnsLogEntry, producer sarama.AsyncProducer, topic string, opts *logOptions) {
 	for message := range logC {
 		encoded, _ := message.Encode()
-		fmt.Println("Kafka: " + string(encoded))
+		msg := &sarama.ProducerMessage{
+			Topic: topic,
+			Value: sarama.StringEncoder(encoded),
+		}
+		producer.Input() <- msg
+
+		// writer.WriteMessages(context.Background(),
+		// 	kafka.Message{
+		// 		Value: []byte(encoded),
+		// 	})
+		// 		fmt.Println("Kafka: " + string(encoded))
 
 	}
 }
