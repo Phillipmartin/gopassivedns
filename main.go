@@ -513,9 +513,14 @@ func doCapture(
 	//setup garbage collection for this map
 	go cleanDnsCache(&conntable, gcAgeDur, gcIntervalDur, stats)
 
+	var packetWg sync.WaitGroup
 	for i := 0; i < config.numprocs; i++ {
 		log.Debugf("Starting packet processing thread %d", i)
-		go handlePacket(&conntable, channels[i], logChan, config.syslogPriority, gcIntervalDur, gcAgeDur, i, stats)
+		packetWg.Add(1)
+		go func(idx int) {
+			defer packetWg.Done()
+			handlePacket(&conntable, channels[idx], logChan, config.syslogPriority, gcIntervalDur, gcAgeDur, idx, stats)
+		}(i)
 	}
 
 	// Use the handle as a packet source to process all packets
@@ -598,14 +603,15 @@ CAPTURE:
 			break CAPTURE
 		}
 	}
-	gracefulShutdown(channels, reChan, logChan)
+	gracefulShutdown(channels, reChan, logChan, &packetWg)
 }
 
 //If we shut down without doing this stuff, we will lose some of the packet data
 //still in the processing pipeline.
 func gracefulShutdown(channels []chan *packetData,
 	reChan chan tcpDataStruct,
-	logChan chan dnsLogEntry) {
+	logChan chan dnsLogEntry,
+	packetWg *sync.WaitGroup) {
 
 	var wait_time int = 6
 	var numprocs int = len(channels)
@@ -627,6 +633,10 @@ OUTER:
 	for i := 0; i < numprocs; i++ {
 		close(channels[i])
 	}
+
+	// Wait for all packet processing goroutines to finish sending to logChan
+	// before closing it, to avoid a send-on-closed-channel race.
+	packetWg.Wait()
 
 	log.Debug("waiting for log pipeline to flush...")
 	close(logChan)

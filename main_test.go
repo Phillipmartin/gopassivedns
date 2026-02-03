@@ -635,8 +635,8 @@ func TestParseMX(t *testing.T) {
 			t.Fatalf("Bad question type %s, expecting MX\n", log.Question_Type)
 		}
 
-		if log.Answer != "alt3.aspmx.l.google.com" {
-			t.Fatalf("Bad answer %s, expecting alt3.aspmx.l.google.com\n", log.Answer)
+		if log.Answer != "40 alt3.aspmx.l.google.com" {
+			t.Fatalf("Bad answer %s, expecting 40 alt3.aspmx.l.google.com\n", log.Answer)
 		}
 
 		if log.Answer_Type != "MX" {
@@ -841,41 +841,6 @@ func TestDoCaptureTCP(t *testing.T) {
 
 }
 
-/*
-
-func TestDoCaptureMixed(*testing.T){
-
-}
-
-
-func TestParseMultipleTCPPackets(*testing.T){
-
-}
-
-func TestParseSRV(*testing.T){
-
-}
-
-func TestParsePTR(*testing.T){
-
-}
-
-func TestParseANY(*testing.T){
-
-}
-
-func TestParseCNAME(*testing.T){
-
-}
-
-func TestParseSOA(*testing.T){
-
-}
-
-func TestParseUnknown(*testing.T){
-
-}
-*/
 
 func TestConntableGC(t *testing.T) {
 	gcAge, _ := time.ParseDuration("-5s")
@@ -906,28 +871,6 @@ func TestConntableGC(t *testing.T) {
 	}
 }
 
-/*
-func TestTcpNoPayload(*testing.T){
-
-}
-
-func TestUDPNoPayload(*testing.T){
-
-}
-
-func TestTCPNotDNS(*testing.T){
-
-}
-
-func TestUDPNotDNS(*testing.T){
-
-}
-
-func TestTCPMultiPakcet(*testing.T){
-
-}
-
-*/
 
 //func initHandle(dev string, pcapFile string, bpf string, pfring bool) *pcap.Handle
 
@@ -982,9 +925,6 @@ func TestInitHandleDev(t *testing.T) {
 	}
 }
 
-func TestParseLevel(t *testing.T) {
-
-}
 
 func TestParseFacility(t *testing.T) {
 	m := make(map[string]syslog.Priority)
@@ -1050,11 +990,6 @@ func TestParsePriority(t *testing.T) {
 
 }
 
-/*
-func TestInitLogging(t *testing.T){
-
-}
-*/
 
 func TestMain(m *testing.M) {
 	var statsdHost = flag.String("test_statsd_host", "", "Statsd server hostname or IP")
