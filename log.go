@@ -18,8 +18,8 @@ import (
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
-// json is a high-performance JSON encoder using jsoniter with fastest configuration
-var json = jsoniter.ConfigFastest
+// jsonLog is a high-performance JSON encoder using jsoniter with fastest configuration
+var jsonLog = jsoniter.ConfigFastest
 
 // codebeat:disable[TOO_MANY_IVARS]
 type logOptions struct {
@@ -113,7 +113,7 @@ type dnsLogEntry struct {
 //private, idempotent function that ensures the json is encoded
 func (dle *dnsLogEntry) ensureEncoded() {
 	if dle.encoded == nil && dle.err == nil {
-		dle.encoded, dle.err = json.Marshal(dle)
+		dle.encoded, dle.err = jsonLog.Marshal(dle)
 	}
 }
 
@@ -233,7 +233,7 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 	}
 
 	writer := bufio.NewWriter(logger)
-	enc := json.NewEncoder(writer)
+	enc := jsonLog.NewEncoder(writer)
 
 	for message := range logC {
 		err := enc.Encode(message)
