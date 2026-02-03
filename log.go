@@ -29,6 +29,7 @@ type logOptions struct {
 	MaxSize        int
 	KafkaBrokers   string
 	KafkaTopic     string
+	KafkaAvro      bool
 	SyslogFacility string
 	SyslogPriority string
 	SensorName     string
@@ -44,6 +45,7 @@ func NewLogOptions(config *pdnsConfig) *logOptions {
 		FluentdSocket:  config.fluentdSocket,
 		KafkaBrokers:   config.kafkaBrokers,
 		KafkaTopic:     config.kafkaTopic,
+		KafkaAvro:      config.kafkaAvro,
 		MaxAge:         config.logMaxAge,
 		MaxSize:        config.logMaxSize,
 		MaxBackups:     config.logMaxBackups,
@@ -253,12 +255,36 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 
 }
 
-//logs to kafka
+//logs to kafka, optionally encoding as Avro single object format
 func logConnKafka(logC chan dnsLogEntry, opts *logOptions) {
-	for message := range logC {
-		encoded, _ := message.Encode()
-		fmt.Println("Kafka: " + string(encoded))
+	producer, err := newKafkaProducer(opts.KafkaBrokers, opts.KafkaTopic)
+	if err != nil {
+		log.Fatalf("Failed to create Kafka producer: %s", err)
+	}
+	defer producer.Close()
 
+	if opts.KafkaAvro {
+		log.Debug("Kafka Avro single object encoding enabled")
+	}
+
+	for message := range logC {
+		var encoded []byte
+		var encErr error
+
+		if opts.KafkaAvro {
+			encoded, encErr = message.EncodeAvroSingleObject()
+		} else {
+			encoded, encErr = message.Encode()
+		}
+
+		if encErr != nil {
+			log.Errorf("Failed to encode message for Kafka: %s", encErr)
+			continue
+		}
+
+		if err := producer.Send(encoded); err != nil {
+			log.Errorf("Failed to send message to Kafka: %s", err)
+		}
 	}
 }
 
