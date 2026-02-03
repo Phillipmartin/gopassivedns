@@ -14,7 +14,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/quipo/statsd"
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 

@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestMarshalMsgpack(t *testing.T) {

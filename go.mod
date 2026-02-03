@@ -9,17 +9,16 @@ require (
 	github.com/google/gopacket v1.1.19
 	github.com/json-iterator/go v1.1.12
 	github.com/quipo/statsd v0.0.0-20180118161217-3d6a5565f314
-	github.com/vmihailenco/msgpack v4.0.4+incompatible
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
-	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421 // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
 	golang.org/x/sys v0.13.0 // indirect
-	google.golang.org/appengine v1.6.8 // indirect
-	google.golang.org/protobuf v1.26.0 // indirect
 )
