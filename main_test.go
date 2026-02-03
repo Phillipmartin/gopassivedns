@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcap"
 	"github.com/quipo/statsd"
 )
 
