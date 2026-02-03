@@ -25,6 +25,7 @@ type pdnsConfig struct {
 
 	kafkaBrokers   string
 	kafkaTopic     string
+	kafkaAvro      bool
 	logFile        string
 	logMaxAge      int
 	logMaxSize     int
@@ -64,6 +65,7 @@ func initConfig() *pdnsConfig {
 	var syslogFacility = flag.String("syslog_facility", getEnvStr("PDNS_SYSLOG_FACILITY", ""), "syslog facility")            //gopassivedns
 	var syslogPriority = flag.String("syslog_priority", getEnvStr("PDNS_SYSLOG_PRIORITY", ""), "syslog priority")            //gopassivedns
 	var configFile = flag.String("config", getEnvStr("PDNS_CONFIG", ""), "config file")
+	var kafkaAvro = flag.Bool("kafka_avro", getEnvBool("PDNS_KAFKA_AVRO", false), "Encode Kafka messages in Avro single object format")
 	var fluentdSocket = flag.String("fluentd_socket", getEnvStr("PDNS_FLUENTD_SOCKET", ""), "Path to Fluentd unix socket")
 	var snapLen = flag.Int("snaplen", getEnvInt("PDNS_SNAPLEN", 4096), "The snaplen used in the pcap handle")
 
@@ -101,6 +103,7 @@ func initConfig() *pdnsConfig {
 
 			kafkaBrokers:   *kafkaBrokers,
 			kafkaTopic:     *kafkaTopic,
+			kafkaAvro:      *kafkaAvro,
 			logFile:        *logFile,
 			logMaxAge:      *logMaxAge,
 			logMaxSize:     *logMaxSize,
