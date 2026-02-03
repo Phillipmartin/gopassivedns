@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/gopacket/layers"
+	"github.com/gopacket/gopacket/layers"
 )
 
 func TestConnectionTableConcurrentAccess(t *testing.T) {
