@@ -350,3 +350,324 @@ func TestLevelToTypeCase(t *testing.T) {
 		t.Fatal("case insensitive matching failed")
 	}
 }
+
+func TestLogConnFile(t *testing.T) {
+	// Create a temporary file for logging
+	tmpFile, err := os.CreateTemp("", "gopassivedns_test_*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %s", err)
+	}
+	tmpFileName := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpFileName)
+
+	logC := make(chan dnsLogEntry, 10)
+	opts := &logOptions{
+		Filename:   tmpFileName,
+		MaxSize:    1,
+		MaxBackups: 1,
+		MaxAge:     1,
+	}
+
+	entry := dnsLogEntry{
+		Query_ID:      1234,
+		Question:      "filetest.example.com",
+		Question_Type: "A",
+		Answer:        "1.2.3.4",
+		Answer_Type:   "A",
+		TTL:           300,
+		Server:        net.ParseIP("8.8.8.8"),
+		Client:        net.ParseIP("10.0.0.1"),
+		Timestamp:     "2024-01-01T00:00:00Z",
+		Proto:         "udp",
+	}
+
+	// Send entry and close channel
+	logC <- entry
+	close(logC)
+
+	// Run the file logger
+	logConnFile(logC, opts)
+
+	// Read the file and verify content
+	content, err := os.ReadFile(tmpFileName)
+	if err != nil {
+		t.Fatalf("failed to read log file: %s", err)
+	}
+
+	if !strings.Contains(string(content), "filetest.example.com") {
+		t.Fatalf("log file missing question, got: %s", string(content))
+	}
+	if !strings.Contains(string(content), "1.2.3.4") {
+		t.Fatalf("log file missing answer, got: %s", string(content))
+	}
+}
+
+func TestLogConnFileMultipleEntries(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "gopassivedns_multi_*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %s", err)
+	}
+	tmpFileName := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpFileName)
+
+	logC := make(chan dnsLogEntry, 10)
+	opts := &logOptions{
+		Filename:   tmpFileName,
+		MaxSize:    10,
+		MaxBackups: 1,
+		MaxAge:     1,
+	}
+
+	// Send multiple entries
+	for i := 0; i < 5; i++ {
+		entry := dnsLogEntry{
+			Query_ID:      uint16(1000 + i),
+			Question:      "multi" + string(rune('0'+i)) + ".example.com",
+			Question_Type: "A",
+			Answer:        "1.2.3." + string(rune('0'+i)),
+			Server:        net.ParseIP("8.8.8.8"),
+			Client:        net.ParseIP("10.0.0.1"),
+			Proto:         "udp",
+		}
+		logC <- entry
+	}
+	close(logC)
+
+	logConnFile(logC, opts)
+
+	content, err := os.ReadFile(tmpFileName)
+	if err != nil {
+		t.Fatalf("failed to read log file: %s", err)
+	}
+
+	// Verify all entries are in the file
+	for i := 0; i < 5; i++ {
+		expected := "multi" + string(rune('0'+i)) + ".example.com"
+		if !strings.Contains(string(content), expected) {
+			t.Fatalf("log file missing entry %d: %s", i, expected)
+		}
+	}
+}
+
+func TestInitLoggingWithDebug(t *testing.T) {
+	opts := &logOptions{debug: true}
+	config := &pdnsConfig{numprocs: 4}
+	logChan := initLogging(opts, config)
+	if logChan == nil {
+		t.Fatal("initLogging returned nil channel with debug=true")
+	}
+	if cap(logChan) != packetQueue*4 {
+		t.Fatalf("expected capacity %d, got %d", packetQueue*4, cap(logChan))
+	}
+}
+
+func TestLogConnWithFileBackend(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "gopassivedns_conn_*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %s", err)
+	}
+	tmpFileName := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpFileName)
+
+	logC := make(chan dnsLogEntry, 10)
+	opts := &logOptions{
+		quiet:      true, // Don't log to stdout
+		Filename:   tmpFileName,
+		MaxSize:    10,
+		MaxBackups: 1,
+		MaxAge:     1,
+	}
+
+	entry := dnsLogEntry{
+		Query_ID: 5678,
+		Question: "logconn-file-test.example.com",
+		Server:   net.ParseIP("8.8.8.8"),
+		Client:   net.ParseIP("10.0.0.1"),
+	}
+
+	go func() {
+		logC <- entry
+		time.Sleep(100 * time.Millisecond)
+		close(logC)
+	}()
+
+	logConn(logC, opts, nil)
+
+	// Wait a bit for file to be flushed
+	time.Sleep(50 * time.Millisecond)
+
+	content, err := os.ReadFile(tmpFileName)
+	if err != nil {
+		t.Fatalf("failed to read log file: %s", err)
+	}
+
+	if !strings.Contains(string(content), "logconn-file-test.example.com") {
+		t.Fatalf("log file missing question via logConn, got: %s", string(content))
+	}
+}
+
+func TestLogConnWithBothStdoutAndFile(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "gopassivedns_both_*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %s", err)
+	}
+	tmpFileName := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpFileName)
+
+	logC := make(chan dnsLogEntry, 10)
+	opts := &logOptions{
+		quiet:      false, // Log to stdout too
+		Filename:   tmpFileName,
+		MaxSize:    10,
+		MaxBackups: 1,
+		MaxAge:     1,
+	}
+
+	entry := dnsLogEntry{
+		Query_ID: 9999,
+		Question: "both-backends.example.com",
+		Server:   net.ParseIP("8.8.8.8"),
+		Client:   net.ParseIP("10.0.0.1"),
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	go func() {
+		logC <- entry
+		time.Sleep(100 * time.Millisecond)
+		close(logC)
+	}()
+
+	logConn(logC, opts, nil)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	// Read stdout
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	stdoutOutput := string(buf[:n])
+
+	// Wait for file to be flushed
+	time.Sleep(50 * time.Millisecond)
+
+	// Read file
+	fileContent, err := os.ReadFile(tmpFileName)
+	if err != nil {
+		t.Fatalf("failed to read log file: %s", err)
+	}
+
+	// Verify both backends received the message
+	if !strings.Contains(stdoutOutput, "both-backends.example.com") {
+		t.Fatalf("stdout missing question, got: %s", stdoutOutput)
+	}
+	if !strings.Contains(string(fileContent), "both-backends.example.com") {
+		t.Fatalf("file missing question, got: %s", string(fileContent))
+	}
+}
+
+func TestDnsLogEntryEncodeErrorHandling(t *testing.T) {
+	// Test with a normal entry first to ensure Encode works
+	entry := dnsLogEntry{
+		Question: "test.com",
+		Server:   net.ParseIP("8.8.8.8"),
+		Client:   net.ParseIP("10.0.0.1"),
+	}
+
+	encoded, err := entry.Encode()
+	if err != nil {
+		t.Fatalf("Encode failed: %s", err)
+	}
+	if encoded == nil {
+		t.Fatal("Encode returned nil")
+	}
+}
+
+func TestDnsLogEntrySizeBeforeEncode(t *testing.T) {
+	// Test that Size() works even before explicit Encode()
+	entry := dnsLogEntry{
+		Question:      "size-test.example.com",
+		Question_Type: "AAAA",
+		Server:        net.ParseIP("2001:db8::1"),
+		Client:        net.ParseIP("10.0.0.1"),
+	}
+
+	// Size should trigger encoding
+	size := entry.Size()
+	if size == 0 {
+		t.Fatal("Size() returned 0")
+	}
+
+	// Now Encode should return cached data
+	encoded, err := entry.Encode()
+	if err != nil {
+		t.Fatalf("Encode failed: %s", err)
+	}
+	if len(encoded) != size {
+		t.Fatalf("Size() = %d but len(Encode()) = %d", size, len(encoded))
+	}
+}
+
+func TestFacilityToTypeAllFacilities(t *testing.T) {
+	facilities := []string{
+		"KERN", "USER", "MAIL", "DAEMON", "AUTH", "SYSLOG",
+		"LPR", "NEWS", "UUCP", "CRON", "AUTHPRIV", "FTP",
+		"LOCAL0", "LOCAL1", "LOCAL2", "LOCAL3", "LOCAL4",
+		"LOCAL5", "LOCAL6", "LOCAL7",
+	}
+
+	for _, fac := range facilities {
+		t.Run(fac, func(t *testing.T) {
+			_, err := facilityToType(fac)
+			if err != nil {
+				t.Fatalf("facilityToType(%s) failed: %s", fac, err)
+			}
+			// Also test lowercase
+			_, err = facilityToType(strings.ToLower(fac))
+			if err != nil {
+				t.Fatalf("facilityToType(%s) failed: %s", strings.ToLower(fac), err)
+			}
+		})
+	}
+}
+
+func TestLevelToTypeAllLevels(t *testing.T) {
+	levels := []string{
+		"EMERG", "ALERT", "CRIT", "ERR", "WARNING", "NOTICE", "INFO", "DEBUG",
+	}
+
+	for _, lvl := range levels {
+		t.Run(lvl, func(t *testing.T) {
+			_, err := levelToType(lvl)
+			if err != nil {
+				t.Fatalf("levelToType(%s) failed: %s", lvl, err)
+			}
+			// Also test lowercase
+			_, err = levelToType(strings.ToLower(lvl))
+			if err != nil {
+				t.Fatalf("levelToType(%s) failed: %s", strings.ToLower(lvl), err)
+			}
+		})
+	}
+}
+
+func TestFacilityToTypeInvalid(t *testing.T) {
+	_, err := facilityToType("INVALID_FACILITY")
+	if err == nil {
+		t.Fatal("expected error for invalid facility")
+	}
+}
+
+func TestLevelToTypeInvalid(t *testing.T) {
+	_, err := levelToType("INVALID_LEVEL")
+	if err == nil {
+		t.Fatal("expected error for invalid level")
+	}
+}
