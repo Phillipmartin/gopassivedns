@@ -217,7 +217,7 @@ func logConnStdout(logC chan dnsLogEntry) {
 	}
 }
 
-//logs to a file
+//logs to a file, with retry on write errors (e.g. disk full)
 func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 
 	logger := &lumberjack.Logger{
@@ -227,12 +227,28 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 		MaxAge:     opts.MaxAge, //days
 	}
 
-	enc := ffjson.NewEncoder(bufio.NewWriter(logger))
+	writer := bufio.NewWriter(logger)
+	enc := ffjson.NewEncoder(writer)
 
 	for message := range logC {
-		enc.Encode(message)
+		err := enc.Encode(message)
+		if err != nil {
+			log.Errorf("Error writing to log file: %s, retrying...", err)
+			// flush and reset the writer to clear any partial writes
+			writer.Reset(logger)
+			// retry with backoff up to 5 times
+			for i := 0; i < 5; i++ {
+				time.Sleep(time.Duration(1<<uint(i)) * time.Second)
+				err = enc.Encode(message)
+				if err == nil {
+					break
+				}
+				log.Errorf("Retry %d failed: %s", i+1, err)
+			}
+		}
 	}
 
+	writer.Flush()
 	logger.Close()
 
 }
