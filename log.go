@@ -12,11 +12,14 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/pquerna/ffjson/ffjson"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/quipo/statsd"
 	"github.com/vmihailenco/msgpack"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
+
+// json is a high-performance JSON encoder using jsoniter with fastest configuration
+var json = jsoniter.ConfigFastest
 
 // codebeat:disable[TOO_MANY_IVARS]
 type logOptions struct {
@@ -110,7 +113,7 @@ type dnsLogEntry struct {
 //private, idempotent function that ensures the json is encoded
 func (dle *dnsLogEntry) ensureEncoded() {
 	if dle.encoded == nil && dle.err == nil {
-		dle.encoded, dle.err = ffjson.Marshal(dle)
+		dle.encoded, dle.err = json.Marshal(dle)
 	}
 }
 
@@ -230,7 +233,7 @@ func logConnFile(logC chan dnsLogEntry, opts *logOptions) {
 	}
 
 	writer := bufio.NewWriter(logger)
-	enc := ffjson.NewEncoder(writer)
+	enc := json.NewEncoder(writer)
 
 	for message := range logC {
 		err := enc.Encode(message)
