@@ -157,6 +157,12 @@ func initLogEntry(
 		*protocol = "udp"
 	}
 
+	// guard against empty Questions slice (can happen with malformed packets)
+	if len(question.Questions) == 0 {
+		log.Debug("Skipping DNS entry with no questions")
+		return
+	}
+
 	// a response code other than 0 means failure of some kind
 	if reply.ResponseCode != 0 {
 
@@ -231,21 +237,29 @@ func cleanDnsCache(
 
 		//max_age should be negative, e.g. -1m
 		cleanupCutoff := time.Now().Add(maxAge)
+
+		// collect keys to delete under read lock
+		var toDelete []string
 		conntable.RLock()
 		for key, item := range conntable.connections {
 			if item.inserted.Before(cleanupCutoff) {
-				conntable.RUnlock()
-				conntable.Lock()
-				log.Debug("conntable GC: cleanup query ID " + key)
-				delete(conntable.connections, key)
-				conntable.Unlock()
-				conntable.RLock()
-				if stats != nil {
-					stats.Incr("cache_entries_dropped", 1)
-				}
+				toDelete = append(toDelete, key)
 			}
 		}
 		conntable.RUnlock()
+
+		// delete under write lock
+		if len(toDelete) > 0 {
+			conntable.Lock()
+			for _, key := range toDelete {
+				log.Debug("conntable GC: cleanup query ID " + key)
+				delete(conntable.connections, key)
+			}
+			conntable.Unlock()
+			if stats != nil {
+				stats.Incr("cache_entries_dropped", int64(len(toDelete)))
+			}
+		}
 	}
 }
 
@@ -487,7 +501,7 @@ func doCapture(
 	/* init channels for the packet handlers and kick off handler threads */
 	var channels []chan *packetData
 	for i := 0; i < config.numprocs; i++ {
-		log.Debug("Creating packet processing channel %d", i)
+		log.Debugf("Creating packet processing channel %d", i)
 		channels = append(channels, make(chan *packetData, packetQueue))
 	}
 

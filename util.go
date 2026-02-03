@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"strconv"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"strconv"
 )
 
 /*
@@ -15,29 +17,50 @@ import (
 */
 func TypeString(dnsType layers.DNSType) string {
 	switch dnsType {
-	default:
-		//take a blind stab...at least this shouldn't *lose* data
-		return strconv.Itoa(int(dnsType))
 	case layers.DNSTypeA:
 		return "A"
-	case layers.DNSTypeAAAA:
-		return "AAAA"
-	case layers.DNSTypeCNAME:
-		return "CNAME"
-	case layers.DNSTypeMX:
-		return "MX"
 	case layers.DNSTypeNS:
 		return "NS"
-	case layers.DNSTypePTR:
-		return "PTR"
-	case layers.DNSTypeTXT:
-		return "TXT"
+	case layers.DNSTypeMD:
+		return "MD"
+	case layers.DNSTypeMF:
+		return "MF"
+	case layers.DNSTypeCNAME:
+		return "CNAME"
 	case layers.DNSTypeSOA:
 		return "SOA"
+	case layers.DNSTypeMB:
+		return "MB"
+	case layers.DNSTypeMG:
+		return "MG"
+	case layers.DNSTypeMR:
+		return "MR"
+	case layers.DNSTypeNULL:
+		return "NULL"
+	case layers.DNSTypeWKS:
+		return "WKS"
+	case layers.DNSTypePTR:
+		return "PTR"
+	case layers.DNSTypeHINFO:
+		return "HINFO"
+	case layers.DNSTypeMINFO:
+		return "MINFO"
+	case layers.DNSTypeMX:
+		return "MX"
+	case layers.DNSTypeTXT:
+		return "TXT"
+	case layers.DNSTypeAAAA:
+		return "AAAA"
 	case layers.DNSTypeSRV:
 		return "SRV"
-	case 255: //ANY query per http://tools.ietf.org/html/rfc1035#page-12
+	case layers.DNSTypeOPT:
+		return "OPT"
+	case layers.DNSTypeURI:
+		return "URI"
+	case 255:
 		return "ANY"
+	default:
+		return strconv.Itoa(int(dnsType))
 	}
 }
 
@@ -50,9 +73,6 @@ func TypeString(dnsType layers.DNSType) string {
 */
 func RrString(rr layers.DNSResourceRecord) string {
 	switch rr.Type {
-	default:
-		//take a blind stab...at least this shouldn't *lose* data
-		return string(rr.Data)
 	case layers.DNSTypeA:
 		return rr.IP.String()
 	case layers.DNSTypeAAAA:
@@ -60,8 +80,7 @@ func RrString(rr layers.DNSResourceRecord) string {
 	case layers.DNSTypeCNAME:
 		return string(rr.CNAME)
 	case layers.DNSTypeMX:
-		//TODO: add the priority
-		return string(rr.MX.Name)
+		return fmt.Sprintf("%d %s", rr.MX.Preference, string(rr.MX.Name))
 	case layers.DNSTypeNS:
 		return string(rr.NS)
 	case layers.DNSTypePTR:
@@ -69,11 +88,19 @@ func RrString(rr layers.DNSResourceRecord) string {
 	case layers.DNSTypeTXT:
 		return string(rr.TXT)
 	case layers.DNSTypeSOA:
-		//TODO: rebuild the full SOA string
-		return string(rr.SOA.RName)
+		return fmt.Sprintf("%s %s %d %d %d %d %d",
+			string(rr.SOA.MName), string(rr.SOA.RName),
+			rr.SOA.Serial, rr.SOA.Refresh, rr.SOA.Retry,
+			rr.SOA.Expire, rr.SOA.Minimum)
 	case layers.DNSTypeSRV:
-		//TODO: rebuild the full SRV string
-		return string(rr.SRV.Name)
+		return fmt.Sprintf("%d %d %d %s",
+			rr.SRV.Priority, rr.SRV.Weight, rr.SRV.Port, string(rr.SRV.Name))
+	case layers.DNSTypeURI:
+		return string(rr.Data)
+	case layers.DNSTypeOPT:
+		return string(rr.Data)
+	default:
+		return string(rr.Data)
 	}
 }
 
