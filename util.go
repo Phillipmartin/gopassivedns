@@ -55,6 +55,14 @@ func TypeString(dnsType layers.DNSType) string {
 		return "SRV"
 	case layers.DNSTypeOPT:
 		return "OPT"
+	case layers.DNSTypeRRSIG:
+		return "RRSIG"
+	case layers.DNSTypeDNSKEY:
+		return "DNSKEY"
+	case layers.DNSTypeSVCB:
+		return "SVCB"
+	case layers.DNSTypeHTTPS:
+		return "HTTPS"
 	case layers.DNSTypeURI:
 		return "URI"
 	case 255:
