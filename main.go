@@ -409,7 +409,7 @@ func handlePacket(
 					stats)
 			} else if packet.HasTCPLayer() {
 				assembler.AssembleWithTimestamp(
-					packet.GetIPLayer().NetworkFlow(),
+					packet.GetNetworkFlow(),
 					packet.GetTCPLayer(), *packet.GetTimestamp())
 				continue
 			} else if packet.HasDNSLayer() {
@@ -543,11 +543,13 @@ func doCapture(
 
 	var ethLayer layers.Ethernet
 	var ipLayer layers.IPv4
+	var ip6Layer layers.IPv6
 
 	parser := gopacket.NewDecodingLayerParser(
 		layers.LayerTypeEthernet,
 		&ethLayer,
 		&ipLayer,
+		&ip6Layer,
 	)
 
 	foundLayerTypes := []gopacket.LayerType{}
@@ -570,6 +572,12 @@ CAPTURE:
 					channels[int(ipLayer.NetworkFlow().FastHash())&(config.numprocs-1)] <- pd
 					if stats != nil {
 						stats.Incr("packets", 1)
+					}
+				} else if foundLayerType(layers.LayerTypeIPv6, foundLayerTypes) {
+					pd := NewPacketData(packet)
+					channels[int(ip6Layer.NetworkFlow().FastHash())&(config.numprocs-1)] <- pd
+					if stats != nil {
+						stats.Incr("packets_ipv6", 1)
 					}
 				}
 			} else {

@@ -24,6 +24,7 @@ type packetData struct {
 
 	ethLayer *layers.Ethernet
 	ipLayer  *layers.IPv4
+	ip6Layer *layers.IPv6
 	udpLayer *layers.UDP
 	tcpLayer *layers.TCP
 	dns      *layers.DNS
@@ -64,6 +65,7 @@ func (pd *packetData) Parse() error {
 	} else if pd.datatype == "packet" {
 		pd.ethLayer = &layers.Ethernet{}
 		pd.ipLayer = &layers.IPv4{}
+		pd.ip6Layer = &layers.IPv6{}
 		pd.udpLayer = &layers.UDP{}
 		pd.tcpLayer = &layers.TCP{}
 		pd.dns = &layers.DNS{}
@@ -74,6 +76,7 @@ func (pd *packetData) Parse() error {
 			layers.LayerTypeEthernet,
 			pd.ethLayer,
 			pd.ipLayer,
+			pd.ip6Layer,
 			pd.udpLayer,
 			pd.tcpLayer,
 			pd.dns,
@@ -90,17 +93,20 @@ func (pd *packetData) Parse() error {
 }
 
 func (pd *packetData) GetSrcIP() net.IP {
-	if pd.ipLayer != nil {
+	if pd.HasIPv4Layer() {
 		return pd.ipLayer.SrcIP
+	} else if pd.HasIPv6Layer() {
+		return pd.ip6Layer.SrcIP
 	} else {
 		return net.IP(pd.tcpdata.IpLayer.Src().Raw())
 	}
-
 }
 
 func (pd *packetData) GetDstIP() net.IP {
-	if pd.ipLayer != nil {
+	if pd.HasIPv4Layer() {
 		return pd.ipLayer.DstIP
+	} else if pd.HasIPv6Layer() {
+		return pd.ip6Layer.DstIP
 	} else {
 		return net.IP(pd.tcpdata.IpLayer.Dst().Raw())
 	}
@@ -118,6 +124,18 @@ func (pd *packetData) GetIPLayer() *layers.IPv4 {
 	return pd.ipLayer
 }
 
+func (pd *packetData) GetIP6Layer() *layers.IPv6 {
+	return pd.ip6Layer
+}
+
+// GetNetworkFlow returns the network flow for either IPv4 or IPv6 packets.
+func (pd *packetData) GetNetworkFlow() gopacket.Flow {
+	if pd.HasIPv4Layer() {
+		return pd.ipLayer.NetworkFlow()
+	}
+	return pd.ip6Layer.NetworkFlow()
+}
+
 func (pd *packetData) GetDNSLayer() *layers.DNS {
 	return pd.dns
 }
@@ -127,7 +145,15 @@ func (pd *packetData) HasTCPLayer() bool {
 }
 
 func (pd *packetData) HasIPLayer() bool {
+	return pd.HasIPv4Layer() || pd.HasIPv6Layer()
+}
+
+func (pd *packetData) HasIPv4Layer() bool {
 	return foundLayerType(layers.LayerTypeIPv4, pd.foundLayerTypes)
+}
+
+func (pd *packetData) HasIPv6Layer() bool {
+	return foundLayerType(layers.LayerTypeIPv6, pd.foundLayerTypes)
 }
 
 func (pd *packetData) HasDNSLayer() bool {
